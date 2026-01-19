@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "886397616676",
+    "project_id": "soilsense-b2435",
+    "storage_bucket": "soilsense-b2435.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:886397616676:android:09d70515c906f900edceb1",
+        "android_client_info": {
+          "package_name": "com.example.soilsense"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCO78NcrJreLtWSu2MZpdL1XWIwDfAcu_M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:886397616676:android:593000891fd4ecebedceb1",
+        "android_client_info": {
+          "package_name": "com.example.test_app_fixed"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCO78NcrJreLtWSu2MZpdL1XWIwDfAcu_M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
