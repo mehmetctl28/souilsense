@@ -1,41 +1,67 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
-import 'wrappers/main_wrapper.dart';
 import 'package:provider/provider.dart';
+
+import 'firebase_options.dart';
+import 'constants/colors.dart';
+import 'providers/auth_provider.dart';
 import 'providers/plant_provider.dart';
 import 'providers/todo_provider.dart';
-import 'screens/add_plant_screen.dart';
+import 'providers/theme_provider.dart';
+import 'wrappers/auth_wrapper.dart';
 
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  try {
-    if (DefaultFirebaseOptions.currentPlatform != null) {
-      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-    }
-  } catch (e) {
-    debugPrint('Firebase init failed (will fallback to local): $e');
-  }
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => PlantProvider()),
         ChangeNotifierProvider(create: (_) => TodoProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
-      child: MaterialApp(
-        title: 'SoilSense',
-        theme: ThemeData(useMaterial3: true, colorSchemeSeed: const Color(0xFF1B5E20)),
-        debugShowCheckedModeBanner: false,
-        initialRoute: '/',
-        routes: {
-          '/': (_) => const MainWrapper(),
-          '/add': (_) => const AddPlantScreen(),
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, child) {
+          return MaterialApp(
+            title: 'SoilSense',
+            debugShowCheckedModeBanner: false,
+            themeMode: themeProvider.themeMode,
+            theme: ThemeData(
+              brightness: Brightness.light,
+              primaryColor: AppColors.primary,
+              scaffoldBackgroundColor: AppColors.background,
+              cardColor: Colors.white,
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: AppColors.primary,
+                brightness: Brightness.light,
+                surface: Colors.white,
+              ),
+              useMaterial3: true,
+            ),
+            darkTheme: ThemeData(
+              brightness: Brightness.dark,
+              primaryColor: AppColors.primary,
+              scaffoldBackgroundColor: const Color(0xFF121212),
+              cardColor: const Color(0xFF1E1E1E),
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: AppColors.primary,
+                brightness: Brightness.dark,
+                surface: const Color(0xFF1E1E1E),
+              ),
+              useMaterial3: true,
+            ),
+            home: const AuthWrapper(),
+          );
         },
       ),
     );
