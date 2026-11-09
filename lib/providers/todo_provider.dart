@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/todo.dart';
 import '../models/plant.dart';
+import '../models/sensor_data.dart';
 
 class TodoProvider extends ChangeNotifier {
   final DatabaseReference _dbRef = FirebaseDatabase.instance.ref().child('todos');
@@ -11,83 +13,149 @@ class TodoProvider extends ChangeNotifier {
   List<Todo> _todos = [];
   List<Todo> get todos => _todos;
 
+  StreamSubscription<DatabaseEvent>? _todosSubscription;
+  StreamSubscription<User?>? _authSubscription;
+  bool _isSyncingAuto = false;
+
   TodoProvider() {
-    fetchTodos();
+    _initAuthListener();
   }
 
-  void fetchTodos() {
-    final userId = _auth.currentUser?.uid;
-    if (userId == null) {
-      _todos = [];
-      notifyListeners();
-      return;
-    }
+  void _initAuthListener() {
+    _authSubscription = _auth.authStateChanges().listen((user) {
+      if (user != null) {
+        _listenToTodos(user.uid);
+      } else {
+        _clearTodos();
+      }
+    });
+  }
 
-    _dbRef.onValue.listen((event) {
+  void _listenToTodos(String userId) {
+    _todosSubscription?.cancel();
+
+    _todosSubscription = _dbRef.onValue.listen((event) {
       final data = event.snapshot.value;
-      _todos.clear();
+      final List<Todo> loaded = [];
 
       if (data != null && data is Map) {
         data.forEach((key, value) {
           if (value is Map) {
             final todo = Todo.fromMap(key.toString(), value);
             if (todo.userId == userId) {
-              _todos.add(todo);
+              loaded.add(todo);
             }
           }
         });
       }
+      _todos = loaded;
       notifyListeners();
+    }, onError: (error) {
+      debugPrint("Görev dinleme hatası: $error");
     });
   }
 
-  // Bitkilerin nem durumuna göre otomatik sula görevi oluştur
-  void syncAutoTasks(List<Plant> plants) async {
+  void _clearTodos() {
+    _todosSubscription?.cancel();
+    _todosSubscription = null;
+    _todos = [];
+    notifyListeners();
+  }
+
+  // 6. Bölüm: Olay tabanlı (Event-driven) otomatik görev senkronizasyonu
+  Future<void> syncAutoTasks(List<Plant> plants, [Map<String, SensorData>? sensors]) async {
     final userId = _auth.currentUser?.uid;
-    if (userId == null) return;
+    if (userId == null || _isSyncingAuto) return;
 
-    for (var plant in plants) {
-      bool isThirsty = plant.moistureLevel < plant.minMoisture;
-      
-      // Bu bitki için daha önce eklenmiş otomatik görev var mı?
-      final existingAutoTodo = _todos.firstWhere(
-        (t) => t.plantId == plant.id && t.isAuto,
-        orElse: () => Todo(id: '', userId: '', title: ''),
-      );
+    _isSyncingAuto = true;
+    try {
+      for (var plant in plants) {
+        final liveMoisture = sensors != null && sensors.containsKey(plant.sensorId)
+            ? sensors[plant.sensorId]!.moisture
+            : plant.moistureLevel;
 
-      if (isThirsty && existingAutoTodo.id.isEmpty) {
-        // Susamış ve henüz görevi yok -> Otomatik görev ekle
-        await _dbRef.push().set({
-          'userId': userId,
-          'title': 'Sula: ${plant.name}',
-          'isCompleted': false,
-          'isAuto': true,
-          'plantId': plant.id,
-        });
-      } else if (!isThirsty && existingAutoTodo.id.isNotEmpty) {
-        // Artık susuz değil -> Otomatik görevi kaldır
-        await _dbRef.child(existingAutoTodo.id).remove();
+        final bool isThirsty = liveMoisture < plant.minMoisture;
+
+        final existingActiveAutoTodo = _todos.firstWhere(
+          (t) => t.plantId == plant.id && t.isAuto && !t.isCompleted,
+          orElse: () => Todo(id: '', userId: '', title: ''),
+        );
+
+        if (isThirsty && existingActiveAutoTodo.id.isEmpty) {
+          await _dbRef.push().set({
+            'userId': userId,
+            'title': 'Sula: ${plant.name}',
+            'isCompleted': false,
+            'isAuto': true,
+            'plantId': plant.id,
+            'category': 'Sulama',
+            'priority': 'Yüksek',
+            'dueDate': 'Bugün',
+            'description':
+                'Toprak nemi %${liveMoisture.toInt()} seviyesine düştü (Minimum sınır: %${plant.minMoisture}).',
+          });
+        } else if (!isThirsty && existingActiveAutoTodo.id.isNotEmpty) {
+          await _dbRef.child(existingActiveAutoTodo.id).update({
+            'isCompleted': true,
+            'description': 'Sulama tamamlandı, nem ideal seviyeye ulaştı.',
+          });
+        }
       }
+    } catch (e) {
+      debugPrint("Otomatik görev senkronizasyon hatası: $e");
+    } finally {
+      _isSyncingAuto = false;
     }
   }
 
-  Future<void> addTodo(String title) async {
+  Future<bool> addTodo(
+    String title, {
+    String category = 'Sulama',
+    String priority = 'Normal',
+    String dueDate = 'Bugün',
+    String description = '',
+  }) async {
     final userId = _auth.currentUser?.uid;
-    if (userId == null || title.trim().isEmpty) return;
+    if (userId == null || title.trim().isEmpty) return false;
 
-    await _dbRef.push().set({
-      'userId': userId,
-      'title': title.trim(),
-      'isCompleted': false,
-      'isAuto': false,
-    });
+    try {
+      await _dbRef.push().set({
+        'userId': userId,
+        'title': title.trim(),
+        'isCompleted': false,
+        'isAuto': false,
+        'category': category,
+        'priority': priority,
+        'dueDate': dueDate,
+        'description': description,
+      });
+      return true;
+    } catch (e) {
+      debugPrint("Görev ekleme hatası: $e");
+      return false;
+    }
   }
 
   Future<void> toggleTodo(String todoId, bool currentStatus) async {
-    await _dbRef.child(todoId).update({'isCompleted': !currentStatus});
+    try {
+      await _dbRef.child(todoId).update({'isCompleted': !currentStatus});
+    } catch (e) {
+      debugPrint("Görev güncelleme hatası: $e");
+    }
   }
 
   Future<void> deleteTodo(String todoId) async {
-    await _dbRef.child(todoId).remove();
+    try {
+      await _dbRef.child(todoId).remove();
+    } catch (e) {
+      debugPrint("Görev silme hatası: $e");
+    }
+  }
+
+  @override
+  void dispose() {
+    _todosSubscription?.cancel();
+    _authSubscription?.cancel();
+    super.dispose();
   }
 }

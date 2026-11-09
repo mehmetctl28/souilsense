@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../constants/colors.dart';
 import '../constants/plant_data.dart';
 import '../providers/plant_provider.dart';
+import '../providers/sensor_provider.dart';
 
 class AddPlantScreen extends StatefulWidget {
   const AddPlantScreen({super.key});
@@ -16,6 +17,7 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
   final TextEditingController _sensorController = TextEditingController();
 
   PlantInfo? _selectedPlant;
+  int _customMinMoisture = 30;
   bool _isSaving = false;
 
   @override
@@ -25,7 +27,6 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
     super.dispose();
   }
 
-  // "Listeden Seç" kartına dokununca açılan bitki kütüphanesi
   void _openCatalogSheet() {
     FocusManager.instance.primaryFocus?.unfocus();
     final cardColor = Theme.of(context).cardColor;
@@ -93,8 +94,9 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
                           onTap: () {
                             setState(() {
                               _selectedPlant = item;
-                              if (_nameController.text.isEmpty) {
-                                _nameController.text = item.name.toLowerCase();
+                              _customMinMoisture = item.minMoisture;
+                              if (_nameController.text.trim().isEmpty) {
+                                _nameController.text = "Salonumdaki ${item.name}";
                               }
                             });
                             Navigator.pop(ctx);
@@ -112,36 +114,94 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
     );
   }
 
-  Future<void> _savePlant() async {
+Future<void> _savePlant() async {
     FocusManager.instance.primaryFocus?.unfocus();
+    final plantProvider = Provider.of<PlantProvider>(context, listen: false);
+    final sensorProvider = Provider.of<SensorProvider>(context, listen: false);
+
     final name = _nameController.text.trim();
+    final sensorId = _sensorController.text.trim();
+
+    if (_selectedPlant == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Lütfen önce bitki kütüphanesinden bir bitki türü seçin.")),
+      );
+      return;
+    }
+
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Lütfen bitkinin adını girin.")),
+        const SnackBar(content: Text("Lütfen bitkinize bir isim verin.")),
+      );
+      return;
+    }
+
+    final duplicateName = plantProvider.plants.any(
+      (p) => p.name.toLowerCase() == name.toLowerCase(),
+    );
+    if (duplicateName) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Bu isimde bir bitkiniz zaten var.")),
+      );
+      return;
+    }
+
+    if (sensorId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Lütfen bir Sensör ID girin (Örn: sensor1).")),
+      );
+      return;
+    }
+
+    final duplicateSensor = plantProvider.plants.any(
+      (p) => p.sensorId.toLowerCase() == sensorId.toLowerCase(),
+    );
+    if (duplicateSensor) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Bu sensör başka bir saksıya bağlı! Farklı bir sensör ID girin.")),
       );
       return;
     }
 
     setState(() => _isSaving = true);
 
-    final plantInfo = _selectedPlant ?? PlantData.catalog.first;
-    await Provider.of<PlantProvider>(context, listen: false).addPlant(
+    // Seçilen örnek sensör henüz gerçek veri göndermiyorsa sanal test verisini başlat
+    await sensorProvider.ensureSensorExists(sensorId, initialMoisture: 50.0);
+
+    final success = await plantProvider.addPlant(
       name: name,
-      type: plantInfo.name,
-      sensorId: _sensorController.text.trim(),
-      minMoisture: plantInfo.minMoisture,
-      imageUrl: plantInfo.imageUrl,
+      type: _selectedPlant!.name,
+      sensorId: sensorId,
+      minMoisture: _customMinMoisture,
+      imageUrl: _selectedPlant!.imageUrl,
     );
 
     if (!mounted) return;
     setState(() => _isSaving = false);
-    Navigator.pop(context);
-  }
 
+    if (success) {
+      Navigator.pop(context);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Bitki kaydedilemedi. Lütfen internet bağlantınızı kontrol edin."),
+          backgroundColor: AppColors.statusCritical,
+        ),
+      );
+    }
+  }
+  
   @override
   Widget build(BuildContext context) {
     final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
     final cardColor = Theme.of(context).cardColor;
+    final plantProvider = Provider.of<PlantProvider>(context);
+    final sensorProvider = Provider.of<SensorProvider>(context);
+
+    final usedSensorIds = plantProvider.plants.map((p) => p.sensorId.toLowerCase()).toSet();
+    final availableSensors = sensorProvider.sensors.keys
+        .where((id) => !usedSensorIds.contains(id.toLowerCase()))
+        .toList();
 
     return GestureDetector(
       onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
@@ -168,9 +228,9 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // --- 1. BİTKİ TÜRÜ (LİSTEDEN SEÇ) ---
+                // 1. BİTKİ TÜRÜ SEÇİMİ
                 Text(
-                  "Bitki Türü",
+                  "1. Bitki Türü",
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor),
                 ),
                 const SizedBox(height: 12),
@@ -181,13 +241,9 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
                     decoration: BoxDecoration(
                       color: cardColor,
                       borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.03),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
+                      border: Border.all(
+                        color: _selectedPlant != null ? AppColors.primary.withOpacity(0.4) : Colors.transparent,
+                      ),
                     ),
                     child: Row(
                       children: [
@@ -200,7 +256,7 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
                           ),
                           child: Icon(
                             _selectedPlant == null ? Icons.search : Icons.local_florist,
-                            color: textColor,
+                            color: _selectedPlant == null ? textColor : AppColors.primary,
                             size: 26,
                           ),
                         ),
@@ -210,7 +266,7 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                _selectedPlant?.name ?? "Listeden Seç",
+                                _selectedPlant?.name ?? "Listeden Seç (Zorunlu)",
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
@@ -220,8 +276,8 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
                               const SizedBox(height: 4),
                               Text(
                                 _selectedPlant != null
-                                    ? "Nem Sınırı: %${_selectedPlant!.minMoisture}"
-                                    : "Dokunarak kütüphaneyi aç",
+                                    ? "Önerilen Minimum Nem: %${_selectedPlant!.minMoisture}"
+                                    : "Dokunarak bitki kütüphanesini aç",
                                 style: const TextStyle(fontSize: 13, color: Colors.grey),
                               ),
                             ],
@@ -233,12 +289,12 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 28),
+                const SizedBox(height: 24),
 
-                // --- 2. BİTKİNİN ADI ---
-                const Text(
-                  "Bitkinin Adı",
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey),
+                // 2. BİTKİNİN ADI
+                Text(
+                  "2. Bitkinin Adı",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor),
                 ),
                 const SizedBox(height: 10),
                 Container(
@@ -249,12 +305,11 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
                   ),
                   child: TextField(
                     controller: _nameController,
-                    autofocus: false,
                     onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
                     style: TextStyle(color: textColor),
                     decoration: const InputDecoration(
                       icon: Icon(Icons.edit, color: AppColors.primary, size: 22),
-                      hintText: "Örn: Ofis Çiçeğim",
+                      hintText: "Örn: Salonumdaki Orkide",
                       hintStyle: TextStyle(color: Colors.grey),
                       border: InputBorder.none,
                     ),
@@ -263,10 +318,10 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
 
                 const SizedBox(height: 24),
 
-                // --- 3. SENSÖR KİMLİĞİ (ID) ---
-                const Text(
-                  "Sensör Kimliği (ID)",
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey),
+                // 3. SENSÖR EŞLEŞTİRME
+                Text(
+                  "3. Sensör Eşleştir (ID)",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor),
                 ),
                 const SizedBox(height: 10),
                 Container(
@@ -277,21 +332,85 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
                   ),
                   child: TextField(
                     controller: _sensorController,
-                    autofocus: false,
                     onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
+                    onChanged: (_) => setState(() {}),
                     style: TextStyle(color: textColor),
                     decoration: const InputDecoration(
-                      icon: Icon(Icons.qr_code, color: AppColors.primary, size: 22),
-                      hintText: "Cihaz üzerindeki kodu girin",
+                      icon: Icon(Icons.sensors, color: AppColors.primary, size: 22),
+                      hintText: "Örn: sensor1",
                       hintStyle: TextStyle(color: Colors.grey),
                       border: InputBorder.none,
                     ),
                   ),
                 ),
+                if (availableSensors.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  const Text(
+                    "Boştaki Aktif Sensörler (Seçmek için dokunun):",
+                    style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: availableSensors.map((sId) {
+                      final isSelected = _sensorController.text.trim() == sId;
+                      return ActionChip(
+                        backgroundColor: isSelected ? AppColors.primary : cardColor,
+                        label: Text(
+                          sId,
+                          style: TextStyle(
+                            color: isSelected ? Colors.white : textColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                        avatar: Icon(
+                          Icons.wifi,
+                          size: 16,
+                          color: isSelected ? Colors.white : AppColors.statusGood,
+                        ),
+                        onPressed: () {
+                          setState(() => _sensorController.text = sId);
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ],
 
-                const SizedBox(height: 40),
+                const SizedBox(height: 24),
 
-                // --- 4. BİTKİYİ OLUŞTUR BUTONU ---
+                // 4. BAKIM AYARLARI (MİNİMUM NEM SINIRI)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      "4. Kritik Nem Sınırı",
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor),
+                    ),
+                    Text(
+                      "%$_customMinMoisture",
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
+                ),
+                Slider(
+                  value: _customMinMoisture.toDouble(),
+                  min: 10,
+                  max: 80,
+                  divisions: 14,
+                  activeColor: AppColors.primary,
+                  label: "%$_customMinMoisture",
+                  onChanged: (val) => setState(() => _customMinMoisture = val.round()),
+                ),
+
+                const SizedBox(height: 28),
+
+                // 5. KAYDET VE TEST ET BUTONU
                 SizedBox(
                   width: double.infinity,
                   height: 58,
@@ -305,7 +424,7 @@ class _AddPlantScreenState extends State<AddPlantScreen> {
                     child: _isSaving
                         ? const CircularProgressIndicator(color: Colors.white)
                         : const Text(
-                            "Bitkiyi Oluştur",
+                            "Kaydet ve Eşleştir",
                             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
                           ),
                   ),

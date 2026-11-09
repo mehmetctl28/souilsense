@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/plant_provider.dart';
+import '../providers/sensor_provider.dart';
+import '../models/sensor_data.dart';
 import '../constants/colors.dart';
 import '../constants/plant_data.dart';
+import '../services/plant_intelligence.dart';
 import '../widgets/moisture_chart.dart';
 
 class PlantDetailScreen extends StatelessWidget {
@@ -10,9 +13,18 @@ class PlantDetailScreen extends StatelessWidget {
 
   const PlantDetailScreen({super.key, required this.plantId});
 
+  String _formatTime(int timestamp) {
+    final diff = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(timestamp));
+    if (diff.inMinutes < 1) return "Az önce";
+    if (diff.inMinutes < 60) return "${diff.inMinutes} dk önce";
+    if (diff.inHours < 24) return "${diff.inHours} sa önce";
+    return "${diff.inDays} gün önce";
+  }
+
   @override
   Widget build(BuildContext context) {
     final plantProvider = Provider.of<PlantProvider>(context);
+    final sensorProvider = Provider.of<SensorProvider>(context);
 
     final plantIndex = plantProvider.plants.indexWhere((p) => p.id == plantId);
     if (plantIndex == -1) {
@@ -20,25 +32,43 @@ class PlantDetailScreen extends StatelessWidget {
     }
     final plant = plantProvider.plants[plantIndex];
 
-    // Bitki türü veya adına göre katalogdan bilgiyi bul
-    final catalogInfo = PlantData.catalog.firstWhere(
-      (p) =>
-          p.name.toLowerCase() == plant.type.toLowerCase() ||
-          p.name.toLowerCase() == plant.name.toLowerCase(),
-      orElse: () => PlantData.catalog.first,
+    final SensorData? liveSensor = sensorProvider.getSensor(plant.sensorId);
+    final double liveMoisture = liveSensor != null ? liveSensor.moisture : plant.moistureLevel;
+    final double liveTemp = liveSensor != null ? liveSensor.temperature : plant.temperature;
+    final double liveLight = liveSensor != null ? liveSensor.light : plant.lightLevel;
+    final bool isOnline = liveSensor != null && liveSensor.isOnline;
+
+    final pumpState = sensorProvider.getPumpState(
+      plant.sensorId,
+      fallbackPumpOn: plant.isPumpOn,
     );
+    final historyValues = sensorProvider.getMoistureHistory(plant.sensorId, liveMoisture);
+    final timelineEvents = sensorProvider.getTimeline(plant.sensorId, liveMoisture);
+
+    final int healthScore = PlantIntelligence.calculateHealthScore(plant, liveSensor);
+    final parameterChecks = PlantIntelligence.evaluateParameters(plant, liveSensor);
+    final sensorReport = PlantIntelligence.diagnoseSensor(plant.sensorId, liveSensor);
+
+    PlantInfo? matchedCatalog;
+    for (final item in PlantData.catalog) {
+      if (item.name.toLowerCase() == plant.type.toLowerCase() ||
+          item.name.toLowerCase() == plant.name.toLowerCase()) {
+        matchedCatalog = item;
+        break;
+      }
+    }
 
     final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
     final cardColor = Theme.of(context).cardColor;
     final bottomPadding = MediaQuery.of(context).padding.bottom + 24;
 
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Column(
           children: [
-            // --- 1. ÜST KAPAK GÖRSELİ VE YUVARLAK BUTONLAR ---
+            // 1. ÜST KAPAK GÖRSELİ
             SizedBox(
               height: 230,
               width: double.infinity,
@@ -49,25 +79,17 @@ class PlantDetailScreen extends StatelessWidget {
                       ? Image.network(
                           plant.imageUrl!,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Image.network(
-                            catalogInfo.imageUrl,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(color: AppColors.secondary),
-                          ),
-                        )
-                      : Image.network(
-                          catalogInfo.imageUrl,
-                          fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => Container(color: AppColors.secondary),
-                        ),
+                        )
+                      : Container(color: AppColors.secondary),
                   Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          Colors.black.withOpacity(0.2),
-                          Colors.black.withOpacity(0.55),
+                          Colors.black.withOpacity(0.25),
+                          Colors.black.withOpacity(0.70),
                         ],
                       ),
                     ),
@@ -88,6 +110,21 @@ class PlantDetailScreen extends StatelessWidget {
                               onPressed: () => Navigator.pop(context),
                             ),
                           ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.45),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text(
+                              "Eşik Uyumu: %$healthScore",
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
                           CircleAvatar(
                             radius: 22,
                             backgroundColor: Colors.black.withOpacity(0.35),
@@ -104,25 +141,57 @@ class PlantDetailScreen extends StatelessWidget {
                     ),
                   ),
                   Positioned(
-                    bottom: 20,
+                    bottom: 16,
                     left: 20,
                     right: 20,
-                    child: Text(
-                      plant.name,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
-                      ),
+                    child: Column(
+                      children: [
+                        Text(
+                          plant.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 25,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.45),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.circle,
+                                size: 8,
+                                color: isOnline ? AppColors.statusGood : Colors.orangeAccent,
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  "Düğüm: ${plant.sensorId} • ${sensorReport.statusText}",
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
 
-            // --- 2. SEKME ÇUBUĞU (ANALİZ | BAKIM REHBERİ) ---
+            // 2. SEKMELER (Analiz | Tanılama | Rehber)
             Container(
               color: Theme.of(context).scaffoldBackgroundColor,
               child: TabBar(
@@ -130,35 +199,29 @@ class PlantDetailScreen extends StatelessWidget {
                 unselectedLabelColor: Colors.grey,
                 indicatorColor: AppColors.primary,
                 indicatorWeight: 3,
-                labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 tabs: const [
                   Tab(icon: Icon(Icons.bar_chart_outlined), text: "Analiz"),
-                  Tab(icon: Icon(Icons.menu_book_outlined), text: "Bakım Rehberi"),
+                  Tab(icon: Icon(Icons.analytics_outlined), text: "Tanılama"),
+                  Tab(icon: Icon(Icons.menu_book_outlined), text: "Rehber"),
                 ],
               ),
             ),
 
-            // --- 3. SEKME İÇERİKLERİ (KAYDIRILABİLİR) ---
+            // 3. SEKME İÇERİKLERİ
             Expanded(
               child: TabBarView(
                 children: [
-                  // SEKME 1: ANALİZ
+                  // SEKME 1: ANALİZ VE POMPA KONTROLÜ (Overflow Giderildi)
                   ListView(
                     physics: const BouncingScrollPhysics(),
-                    padding: EdgeInsets.fromLTRB(20, 24, 20, bottomPadding),
+                    padding: EdgeInsets.fromLTRB(20, 20, 20, bottomPadding),
                     children: [
                       Container(
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
                           color: cardColor,
                           borderRadius: BorderRadius.circular(24),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.04),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
                         ),
                         child: Column(
                           children: [
@@ -167,14 +230,14 @@ class PlantDetailScreen extends StatelessWidget {
                               children: [
                                 _buildStatItem(
                                   Icons.water_drop,
-                                  "%${plant.moistureLevel.toInt()}",
-                                  "Nem (Sınır %${plant.minMoisture})",
+                                  "%${liveMoisture.toInt()}",
+                                  "Nem (Eşik %${plant.minMoisture})",
                                   textColor,
                                 ),
                                 _buildVerticalDivider(),
                                 _buildStatItem(
                                   Icons.thermostat,
-                                  "${plant.temperature.toStringAsFixed(1)}°C",
+                                  "${liveTemp.toStringAsFixed(1)}°C",
                                   "Sıcaklık",
                                   textColor,
                                   iconColor: Colors.orange,
@@ -182,7 +245,7 @@ class PlantDetailScreen extends StatelessWidget {
                                 _buildVerticalDivider(),
                                 _buildStatItem(
                                   Icons.wb_sunny,
-                                  "%${plant.lightLevel.toInt()}",
+                                  "%${liveLight.toInt()}",
                                   "Işık",
                                   textColor,
                                   iconColor: Colors.amber,
@@ -193,73 +256,356 @@ class PlantDetailScreen extends StatelessWidget {
                               padding: EdgeInsets.symmetric(vertical: 16),
                               child: Divider(height: 1),
                             ),
+                            // Manuel Pompa Kontrol Satırı
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      "Sulama Sistemi",
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 16,
-                                        color: textColor,
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        "Sulama Pompası",
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 15,
+                                          color: textColor,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      plant.isPumpOn ? "Pompa çalışıyor" : "Pompa kapalı",
-                                      style: const TextStyle(color: Colors.grey, fontSize: 13),
-                                    ),
-                                  ],
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        "Cihaz Durumu: ${pumpState.actualState ? 'Çalışıyor' : 'Kapalı'} • Komut: ${pumpState.requestedState ? 'Açık (${pumpState.maxDurationSeconds}sn)' : 'Beklemede'}",
+                                        style: const TextStyle(color: Colors.grey, fontSize: 12),
+                                      ),
+                                    ],
+                                  ),
                                 ),
+                                const SizedBox(width: 8),
                                 Switch(
-                                  value: plant.isPumpOn,
+                                  value: pumpState.requestedState,
                                   activeColor: Colors.white,
                                   activeTrackColor: AppColors.primary,
-                                  onChanged: (val) => plantProvider.togglePump(plant.id, val),
+                                  onChanged: (val) {
+                                    plantProvider.togglePump(plant.id, val);
+                                    sensorProvider.requestPumpState(
+                                      sensorId: plant.sensorId,
+                                      requestedState: val,
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                            const Divider(height: 20),
+                            // Otomatik Sulama Satırı (Expanded ile Overflow Korumalı)
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        "Otomatik Sulama Modu",
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 15,
+                                          color: textColor,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        "Nem %${plant.minMoisture} altına düştüğünde pompayı otomatik tetikle",
+                                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Switch(
+                                  value: pumpState.autoWatering,
+                                  activeColor: Colors.white,
+                                  activeTrackColor: AppColors.secondary,
+                                  onChanged: (val) {
+                                    sensorProvider.requestPumpState(
+                                      sensorId: plant.sensorId,
+                                      requestedState: pumpState.requestedState,
+                                      autoWatering: val,
+                                    );
+                                  },
                                 ),
                               ],
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 24),
-                      Center(
-                        child: Text(
-                          "Son 7 Günlük Nem",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: textColor,
-                          ),
-                        ),
+                      const SizedBox(height: 20),
+                      MoistureChart(
+                        currentMoisture: liveMoisture,
+                        currentTemp: liveTemp,
+                        currentLight: liveLight,
+                        historyValues: historyValues,
                       ),
-                      const SizedBox(height: 16),
-                      const MoistureChart(),
                     ],
                   ),
 
-                  // SEKME 2: BAKIM REHBERİ
+                  // SEKME 2: TEKNİK TANILAMA (Eşik Analizi + Donanım Durumu + Kayıtlar)
                   ListView(
                     physics: const BouncingScrollPhysics(),
-                    padding: EdgeInsets.fromLTRB(20, 24, 20, bottomPadding),
+                    padding: EdgeInsets.fromLTRB(20, 20, 20, bottomPadding),
                     children: [
                       Text(
-                        "Bakım Kartı: ${plant.name}",
+                        "Sensör Parametre & Eşik Analizi",
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: textColor),
+                      ),
+                      const SizedBox(height: 12),
+                      ...parameterChecks.map((check) {
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: cardColor,
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(check.icon, color: check.statusColor, size: 20),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      check.parameter,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                        color: textColor,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: check.statusColor.withOpacity(0.12),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      check.statusLabel,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: check.statusColor,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    "Ölçülen: ${check.measuredValue}",
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                  Text(
+                                    "Referans: ${check.referenceRange}",
+                                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                check.technicalNote,
+                                style: const TextStyle(fontSize: 12, color: Colors.grey, height: 1.4),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+
+                      const SizedBox(height: 12),
+                      Text(
+                        "Donanım & Telemetri Durumu",
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: textColor),
+                      ),
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: cardColor,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    "ESP32 Düğümü: ${plant.sensorId}",
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: sensorReport.badgeColor.withOpacity(0.12),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    sensorReport.statusText,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: sensorReport.badgeColor,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              "Son Paket: ${sensorReport.latencyText}",
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              sensorReport.detailText,
+                              style: const TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 18),
+                      Text(
+                        "Kayıt Geçmişi (System Log)",
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: textColor),
+                      ),
+                      const SizedBox(height: 10),
+                      ...timelineEvents.map((ev) {
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: cardColor,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                ev.type == 'watering' ? Icons.water_drop_outlined : Icons.sensors,
+                                color: AppColors.primary,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      ev.title,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13,
+                                        color: textColor,
+                                      ),
+                                    ),
+                                    Text(
+                                      ev.subtitle,
+                                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                _formatTime(ev.timestamp),
+                                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+
+                  // SEKME 3: BAKIM REHBERİ
+                  ListView(
+                    physics: const BouncingScrollPhysics(),
+                    padding: EdgeInsets.fromLTRB(20, 20, 20, bottomPadding),
+                    children: [
+                      if (matchedCatalog == null)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 16),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.info_outline, color: Colors.orange),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  "'${plant.type}' türü katalogda bulunamadığı için standart bakım parametreleri gösteriliyor.",
+                                  style: TextStyle(fontSize: 13, color: textColor),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      Text(
+                        matchedCatalog != null
+                            ? "Bakım Kartı: ${matchedCatalog.name}"
+                            : "Standart Bakım Rehberi",
                         style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor),
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        catalogInfo.description,
+                        matchedCatalog?.description ??
+                            "Toprak nemini düzenli takip edin ve bitkinizi doğrudan yakıcı güneş ışığından koruyun.",
                         style: TextStyle(fontSize: 15, color: textColor.withOpacity(0.8), height: 1.5),
                       ),
                       const SizedBox(height: 20),
-                      _buildCareCard(Icons.water_drop_outlined, "Sulama", catalogInfo.watering, cardColor, textColor),
-                      _buildCareCard(Icons.wb_sunny_outlined, "Işık İhtiyacı", catalogInfo.light, cardColor, textColor),
-                      _buildCareCard(Icons.thermostat_outlined, "Sıcaklık", catalogInfo.temperature, cardColor, textColor),
-                      _buildCareCard(Icons.content_cut, "Budama", "Kuruyan yaprakları temizleyin.", cardColor, textColor),
+                      _buildCareCard(
+                        Icons.water_drop_outlined,
+                        "Sulama",
+                        matchedCatalog?.watering ??
+                            "Toprak nemi %${plant.minMoisture} altına düştüğünde sulayın.",
+                        cardColor,
+                        textColor,
+                      ),
+                      _buildCareCard(
+                        Icons.wb_sunny_outlined,
+                        "Işık İhtiyacı",
+                        matchedCatalog?.light ?? "Aydınlık, dolaylı gün ışığı alan bir konum tercih edin.",
+                        cardColor,
+                        textColor,
+                      ),
+                      _buildCareCard(
+                        Icons.thermostat_outlined,
+                        "Sıcaklık",
+                        matchedCatalog?.temperature ?? "18°C - 26°C arası oda sıcaklığı idealdir.",
+                        cardColor,
+                        textColor,
+                      ),
+                      _buildCareCard(
+                        Icons.content_cut,
+                        "Budama",
+                        "Kuruyan veya sararan yaprakları steril bir makasla temizleyin.",
+                        cardColor,
+                        textColor,
+                      ),
                     ],
                   ),
                 ],
@@ -271,12 +617,18 @@ class PlantDetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStatItem(IconData icon, String value, String label, Color textColor, {Color iconColor = AppColors.primary}) {
+  Widget _buildStatItem(
+    IconData icon,
+    String value,
+    String label,
+    Color textColor, {
+    Color iconColor = AppColors.primary,
+  }) {
     return Column(
       children: [
-        Icon(icon, color: iconColor, size: 28),
-        const SizedBox(height: 8),
-        Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: textColor)),
+        Icon(icon, color: iconColor, size: 26),
+        const SizedBox(height: 6),
+        Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: textColor)),
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(color: Colors.grey, fontSize: 11)),
       ],
@@ -294,13 +646,6 @@ class PlantDetailScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
       ),
       child: Row(
         children: [

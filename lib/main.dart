@@ -8,13 +8,17 @@ import 'providers/auth_provider.dart';
 import 'providers/plant_provider.dart';
 import 'providers/todo_provider.dart';
 import 'providers/theme_provider.dart';
+import 'providers/sensor_provider.dart';
 import 'wrappers/auth_wrapper.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  final options = DefaultFirebaseOptions.currentPlatform;
+  if (options != null) {
+    await Firebase.initializeApp(options: options);
+  } else {
+    await Firebase.initializeApp();
+  }
   runApp(const MyApp());
 }
 
@@ -26,8 +30,16 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => SensorProvider()),
         ChangeNotifierProvider(create: (_) => PlantProvider()),
-        ChangeNotifierProvider(create: (_) => TodoProvider()),
+        ChangeNotifierProxyProvider2<PlantProvider, SensorProvider, TodoProvider>(
+          create: (_) => TodoProvider(),
+          update: (_, plantProv, sensorProv, todoProv) {
+            final provider = todoProv ?? TodoProvider();
+            provider.syncAutoTasks(plantProv.plants, sensorProv.sensors);
+            return provider;
+          },
+        ),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
       child: Consumer<ThemeProvider>(

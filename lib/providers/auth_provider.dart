@@ -1,15 +1,21 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class AuthProvider extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   User? _user;
+  bool _isLoading = true;
+  StreamSubscription<User?>? _authSubscription;
 
   User? get currentUser => _user;
+  bool get isAuthenticated => _user != null;
+  bool get isLoading => _isLoading;
 
   AuthProvider() {
-    _auth.authStateChanges().listen((User? user) {
+    _authSubscription = _auth.authStateChanges().listen((User? user) {
       _user = user;
+      _isLoading = false;
       notifyListeners();
     });
   }
@@ -21,7 +27,7 @@ class AuthProvider extends ChangeNotifier {
     } on FirebaseAuthException catch (e) {
       return _hataMesajiCevir(e.code);
     } catch (e) {
-      return "Bir hata oluştu.";
+      return "Giriş sırasında bir hata oluştu.";
     }
   }
 
@@ -41,19 +47,19 @@ class AuthProvider extends ChangeNotifier {
     } on FirebaseAuthException catch (e) {
       return _hataMesajiCevir(e.code);
     } catch (e) {
-      return "Bir hata oluştu: $e";
+      return "Kayıt sırasında bir hata oluştu: $e";
     }
   }
 
   Future<void> signOut() async {
     await _auth.signOut();
-    notifyListeners();
   }
 
   String _hataMesajiCevir(String code) {
     switch (code) {
       case 'user-not-found':
-        return 'Böyle bir kullanıcı bulunamadı.';
+      case 'invalid-credential':
+        return 'E-posta veya şifre hatalı.';
       case 'wrong-password':
         return 'Şifre hatalı.';
       case 'email-already-in-use':
@@ -63,7 +69,13 @@ class AuthProvider extends ChangeNotifier {
       case 'weak-password':
         return 'Şifre çok zayıf (en az 6 karakter).';
       default:
-        return 'Giriş başarısız. Lütfen tekrar deneyin.';
+        return 'İşlem başarısız ($code). Lütfen tekrar deneyin.';
     }
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
   }
 }
