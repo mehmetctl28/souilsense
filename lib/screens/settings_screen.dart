@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/colors.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
-import 'login_screen.dart';
+import '../providers/sensor_provider.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -109,8 +109,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      "Sensör ve Pompa Güvenlik Ayarları",
-                      style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: textColor),
+                      "Sensör ve Pompa Güvenlik Sınırları",
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor),
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -155,7 +155,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           }
                           if (ctx.mounted) Navigator.pop(ctx);
                         },
-                        child: const Text("Ayarları Kaydet", style: TextStyle(color: Colors.white)),
+                        child: const Text("Kaydet", style: TextStyle(color: Colors.white)),
                       ),
                     ),
                   ],
@@ -176,7 +176,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: Text("Gizlilik ve Veri Güvenliği", style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
         content: const Text(
           "SoilSense, bitki kayıtlarınızı ve görevlerinizi yalnızca kendi kullanıcı kimliğiniz (users/UID) altında izole olarak saklar.\n\n"
-          "ESP32 sensör telemetri verileri şifreli Firebase bağlantısı üzerinden aktarılır ve üçüncü taraflarla paylaşılmaz.",
+          "Donanım modunda ESP32 sensör verileri üzerine uygulama tarafından simülasyon verisi yazılmaz.",
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Tamam")),
@@ -189,6 +189,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final sensorProvider = Provider.of<SensorProvider>(context);
     final user = authProvider.currentUser;
 
     final email = user?.email ?? "kullanici@soilsense.com";
@@ -265,7 +266,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               const SizedBox(height: 24),
 
-              // GENEL
+              // GENEL AYARLAR
               const Padding(
                 padding: EdgeInsets.only(left: 8, bottom: 8),
                 child: Text("Genel", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
@@ -277,6 +278,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _buildSwitchTile(
                       icon: Icons.notifications_none,
                       title: "Bildirimler",
+                      subtitle: "Kritik nem ve çevrimdışı sensör uyarıları",
                       value: _notificationsEnabled,
                       textColor: textColor,
                       onChanged: _toggleNotifications,
@@ -285,6 +287,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _buildSwitchTile(
                       icon: Icons.dark_mode_outlined,
                       title: "Karanlık Mod",
+                      subtitle: "Tercihiniz cihazda kalıcı olarak saklanır",
                       value: themeProvider.isDarkMode,
                       textColor: textColor,
                       onChanged: (val) => themeProvider.toggleTheme(val),
@@ -295,18 +298,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               const SizedBox(height: 24),
 
-              // DONANIM VE UYGULAMA
+              // DONANIM VE ÇALIŞMA MODU (Bölüm 2.A)
               const Padding(
                 padding: EdgeInsets.only(left: 8, bottom: 8),
-                child: Text("Donanım & Uygulama", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
+                child: Text("Donanım & Çalışma Modu", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
               ),
               Container(
                 decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(20)),
                 child: Column(
                   children: [
+                    _buildSwitchTile(
+                      icon: Icons.memory,
+                      title: "Gerçek ESP32 Donanım Modu",
+                      subtitle: sensorProvider.isHardwareMode
+                          ? "Aktif: Yalnızca fiziksel ESP32 verileri okunur"
+                          : "Simülasyon Modu: Sanal test sensörleri aktif",
+                      value: sensorProvider.isHardwareMode,
+                      textColor: textColor,
+                      onChanged: (val) => sensorProvider.setHardwareMode(val),
+                    ),
+                    Divider(height: 1, indent: 64, color: Colors.grey.withOpacity(0.15)),
                     _buildActionTile(
                       icon: Icons.sensors,
-                      title: "Sensör ve Pompa Ayarları",
+                      title: "Pompa ve Sensör Sınırları",
                       trailingText: "${_maxPumpSeconds}sn / ${_offlineMinutes}dk",
                       textColor: textColor,
                       onTap: _showSensorAndPumpSettings,
@@ -349,7 +363,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _buildActionTile(
                       icon: Icons.info_outline,
                       title: "Sürüm",
-                      trailingText: "1.1.0 (IoT)",
+                      trailingText: "1.2.0 (Dual-Mode IoT)",
                       textColor: textColor,
                       onTap: () {},
                     ),
@@ -362,11 +376,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       iconBgColor: AppColors.statusCritical.withOpacity(0.1),
                       onTap: () async {
                         await authProvider.signOut();
-                        if (!context.mounted) return;
-                        Navigator.of(context).pushAndRemoveUntil(
-                          MaterialPageRoute(builder: (_) => const LoginScreen()),
-                          (route) => false,
-                        );
+                        if (context.mounted) {
+                          Navigator.of(context).popUntil((route) => route.isFirst);
+                        }
                       },
                     ),
                   ],
@@ -383,6 +395,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildSwitchTile({
     required IconData icon,
     required String title,
+    String? subtitle,
     required bool value,
     required Color textColor,
     required ValueChanged<bool> onChanged,
@@ -402,7 +415,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(width: 16),
           Expanded(
-            child: Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: textColor)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor)),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                ],
+              ],
+            ),
           ),
           Switch(
             value: value,
@@ -442,7 +464,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(width: 16),
             Expanded(
-              child: Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: textColor)),
+              child: Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor)),
             ),
             if (trailingText != null) ...[
               Text(trailingText, style: const TextStyle(fontSize: 13, color: Colors.grey, fontWeight: FontWeight.w500)),

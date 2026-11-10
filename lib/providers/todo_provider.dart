@@ -7,18 +7,28 @@ import '../models/plant.dart';
 import '../models/sensor_data.dart';
 
 class TodoProvider extends ChangeNotifier {
-  final DatabaseReference _dbRef = FirebaseDatabase.instance.ref().child('todos');
+  final DatabaseReference _rootRef = FirebaseDatabase.instance.ref();
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   List<Todo> _todos = [];
   List<Todo> get todos => _todos;
 
+  bool _useLegacyPath = false;
+  bool _isSyncingAuto = false;
+  String _lastEvaluatedSignature = '';
+
   StreamSubscription<DatabaseEvent>? _todosSubscription;
   StreamSubscription<User?>? _authSubscription;
-  bool _isSyncingAuto = false;
 
   TodoProvider() {
     _initAuthListener();
+  }
+
+  DatabaseReference _userTodosRef(String userId) {
+    if (_useLegacyPath) {
+      return _rootRef.child('todos');
+    }
+    return _rootRef.child('users').child(userId).child('todos');
   }
 
   void _initAuthListener() {
@@ -34,7 +44,7 @@ class TodoProvider extends ChangeNotifier {
   void _listenToTodos(String userId) {
     _todosSubscription?.cancel();
 
-    _todosSubscription = _dbRef.onValue.listen((event) {
+    _todosSubscription = _userTodosRef(userId).onValue.listen((event) {
       final data = event.snapshot.value;
       final List<Todo> loaded = [];
 
@@ -42,7 +52,7 @@ class TodoProvider extends ChangeNotifier {
         data.forEach((key, value) {
           if (value is Map) {
             final todo = Todo.fromMap(key.toString(), value);
-            if (todo.userId == userId) {
+            if (!_useLegacyPath || todo.userId == userId) {
               loaded.add(todo);
             }
           }
@@ -51,7 +61,10 @@ class TodoProvider extends ChangeNotifier {
       _todos = loaded;
       notifyListeners();
     }, onError: (error) {
-      debugPrint("Görev dinleme hatası: $error");
+      if (!_useLegacyPath) {
+        _useLegacyPath = true;
+        _listenToTodos(userId);
+      }
     });
   }
 
@@ -59,10 +72,30 @@ class TodoProvider extends ChangeNotifier {
     _todosSubscription?.cancel();
     _todosSubscription = null;
     _todos = [];
+    _lastEvaluatedSignature = '';
     notifyListeners();
   }
 
-  // 6. Bölüm: Olay tabanlı (Event-driven) otomatik görev senkronizasyonu
+  // 2.C: Yalnızca sensör nemi veya bitki eşiği değiştiğinde tetiklenir
+  void onTelemetryOrPlantsUpdated(List<Plant> plants, Map<String, SensorData> sensors) {
+    if (plants.isEmpty) return;
+
+    final buffer = StringBuffer();
+    for (final p in plants) {
+      final m = sensors[p.sensorId]?.moisture ?? p.moistureLevel;
+      final isThirsty = m < p.minMoisture;
+      buffer.write('${p.id}:${p.minMoisture}:$isThirsty|');
+    }
+
+    final currentSignature = buffer.toString();
+    if (currentSignature == _lastEvaluatedSignature) {
+      return; // Hiçbir bitkinin eşik durumu değişmedi, gereksiz işlem yapma
+    }
+
+    _lastEvaluatedSignature = currentSignature;
+    syncAutoTasks(plants, sensors);
+  }
+
   Future<void> syncAutoTasks(List<Plant> plants, [Map<String, SensorData>? sensors]) async {
     final userId = _auth.currentUser?.uid;
     if (userId == null || _isSyncingAuto) return;
@@ -82,7 +115,7 @@ class TodoProvider extends ChangeNotifier {
         );
 
         if (isThirsty && existingActiveAutoTodo.id.isEmpty) {
-          await _dbRef.push().set({
+          await _userTodosRef(userId).push().set({
             'userId': userId,
             'title': 'Sula: ${plant.name}',
             'isCompleted': false,
@@ -95,14 +128,14 @@ class TodoProvider extends ChangeNotifier {
                 'Toprak nemi %${liveMoisture.toInt()} seviyesine düştü (Minimum sınır: %${plant.minMoisture}).',
           });
         } else if (!isThirsty && existingActiveAutoTodo.id.isNotEmpty) {
-          await _dbRef.child(existingActiveAutoTodo.id).update({
+          await _userTodosRef(userId).child(existingActiveAutoTodo.id).update({
             'isCompleted': true,
-            'description': 'Sulama tamamlandı, nem ideal seviyeye ulaştı.',
+            'description': 'Sulama tamamlandı, nem referans aralığına ulaştı.',
           });
         }
       }
     } catch (e) {
-      debugPrint("Otomatik görev senkronizasyon hatası: $e");
+      debugPrint("Otomatik görev senkronizasyon uyarısı: $e");
     } finally {
       _isSyncingAuto = false;
     }
@@ -118,35 +151,47 @@ class TodoProvider extends ChangeNotifier {
     final userId = _auth.currentUser?.uid;
     if (userId == null || title.trim().isEmpty) return false;
 
+    final payload = {
+      'userId': userId,
+      'title': title.trim(),
+      'isCompleted': false,
+      'isAuto': false,
+      'category': category,
+      'priority': priority,
+      'dueDate': dueDate,
+      'description': description,
+    };
+
     try {
-      await _dbRef.push().set({
-        'userId': userId,
-        'title': title.trim(),
-        'isCompleted': false,
-        'isAuto': false,
-        'category': category,
-        'priority': priority,
-        'dueDate': dueDate,
-        'description': description,
-      });
+      await _userTodosRef(userId).push().set(payload);
       return true;
     } catch (e) {
-      debugPrint("Görev ekleme hatası: $e");
-      return false;
+      try {
+        _useLegacyPath = true;
+        await _rootRef.child('todos').push().set(payload);
+        _listenToTodos(userId);
+        return true;
+      } catch (inner) {
+        return false;
+      }
     }
   }
 
   Future<void> toggleTodo(String todoId, bool currentStatus) async {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) return;
     try {
-      await _dbRef.child(todoId).update({'isCompleted': !currentStatus});
+      await _userTodosRef(userId).child(todoId).update({'isCompleted': !currentStatus});
     } catch (e) {
       debugPrint("Görev güncelleme hatası: $e");
     }
   }
 
   Future<void> deleteTodo(String todoId) async {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) return;
     try {
-      await _dbRef.child(todoId).remove();
+      await _userTodosRef(userId).child(todoId).remove();
     } catch (e) {
       debugPrint("Görev silme hatası: $e");
     }

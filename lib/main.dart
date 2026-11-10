@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 
-import 'firebase_options.dart';
 import 'constants/colors.dart';
 import 'providers/auth_provider.dart';
 import 'providers/plant_provider.dart';
@@ -13,11 +12,10 @@ import 'wrappers/auth_wrapper.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final options = DefaultFirebaseOptions.currentPlatform;
-  if (options != null) {
-    await Firebase.initializeApp(options: options);
-  } else {
+  try {
     await Firebase.initializeApp();
+  } catch (e) {
+    debugPrint("Firebase başlatma uyarısı: $e");
   }
   runApp(const MyApp());
 }
@@ -29,18 +27,21 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => SensorProvider()),
         ChangeNotifierProvider(create: (_) => PlantProvider()),
         ChangeNotifierProxyProvider2<PlantProvider, SensorProvider, TodoProvider>(
           create: (_) => TodoProvider(),
-          update: (_, plantProv, sensorProv, todoProv) {
-            final provider = todoProv ?? TodoProvider();
-            provider.syncAutoTasks(plantProv.plants, sensorProv.sensors);
-            return provider;
+          update: (_, plantProvider, sensorProvider, todoProvider) {
+            final todo = todoProvider ?? TodoProvider();
+            todo.onTelemetryOrPlantsUpdated(
+              plantProvider.plants,
+              sensorProvider.sensors,
+            );
+            return todo;
           },
         ),
-        ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {

@@ -1,29 +1,87 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:demo_app/main.dart';
+import '../lib/models/plant.dart';
+import '../lib/models/sensor_data.dart';
+import '../lib/services/plant_intelligence.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  group('SoilSense PlantIntelligence & Model Testleri', () {
+    test('Bitki türüne göre bilimsel varsayılan profil doğru atanmalı', () {
+      final cactusProfile = Plant.defaultProfileForType('Kaktüs');
+      final orchidProfile = Plant.defaultProfileForType('Orkide');
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+      expect(cactusProfile['maxMoisture'], 60);
+      expect(orchidProfile['maxMoisture'], 75);
+    });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    test('İdeal sensör değerlerinde sağlık puanı 100 olmalı', () {
+      final plant = Plant(
+        id: 'p1',
+        userId: 'u1',
+        name: 'Salon Orkidem',
+        type: 'Orkide',
+        sensorId: 'sensor1',
+        moistureLevel: 50.0,
+        minMoisture: 30,
+        maxMoisture: 75,
+        minTemp: 19.0,
+        maxTemp: 27.0,
+        minLight: 30.0,
+        maxLight: 75.0,
+      );
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+      final idealSensor = SensorData(
+        sensorId: 'sensor1',
+        moisture: 50.0,
+        temperature: 23.0,
+        light: 55.0,
+        lastUpdate: DateTime.now().millisecondsSinceEpoch,
+      );
+
+      final score = PlantIntelligence.calculateHealthScore(plant, idealSensor);
+      expect(score, 100);
+    });
+
+    test('Kritik düşük nemde sağlık puanı düşmeli ve KRİTİK DÜŞÜK uyarısı üretilmeli', () {
+      final plant = Plant(
+        id: 'p2',
+        userId: 'u1',
+        name: 'Monstera',
+        type: 'Monstera',
+        sensorId: 'sensor2',
+        moistureLevel: 20.0,
+        minMoisture: 40,
+      );
+
+      final drySensor = SensorData(
+        sensorId: 'sensor2',
+        moisture: 20.0,
+        temperature: 24.0,
+        light: 50.0,
+        lastUpdate: DateTime.now().millisecondsSinceEpoch,
+      );
+
+      final score = PlantIntelligence.calculateHealthScore(plant, drySensor);
+      final checks = PlantIntelligence.evaluateParameters(plant, drySensor);
+
+      expect(score, lessThan(70));
+      expect(checks.first.statusLabel, 'KRİTİK DÜŞÜK');
+    });
+
+    test('30 dakikadan eski sensör verisi ÇEVRİMDIŞI olarak işaretlenmeli', () {
+      final oldTimestamp =
+          DateTime.now().subtract(const Duration(minutes: 45)).millisecondsSinceEpoch;
+
+      final staleSensor = SensorData(
+        sensorId: 'sensor3',
+        moisture: 45.0,
+        temperature: 22.0,
+        light: 60.0,
+        lastUpdate: oldTimestamp,
+      );
+
+      expect(staleSensor.isOnline, isFalse);
+      final report = PlantIntelligence.diagnoseSensor('sensor3', staleSensor);
+      expect(report.statusText, 'ÇEVRİMDIŞI');
+    });
   });
 }

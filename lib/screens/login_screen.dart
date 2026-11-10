@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../constants/colors.dart';
 import '../providers/auth_provider.dart';
+import '../wrappers/main_wrapper.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -52,10 +53,18 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
     setState(() => _isLoading = false);
 
-    // Hata varsa göster; başarılıysa AuthWrapper otomatik olarak MainWrapper'ı açacak
     if (errorMessage != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(errorMessage), backgroundColor: AppColors.statusCritical),
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: AppColors.statusCritical,
+        ),
+      );
+    } else {
+      // Giriş başarılı: Önceki ekranları temizle ve doğrudan ana ekranı aç
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const MainWrapper()),
+        (route) => false,
       );
     }
   }
@@ -162,7 +171,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                       ),
                       child: _isLoading
-                          ? const CircularProgressIndicator(color: Colors.white)
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                            )
                           : Text(
                               _isLogin ? "Giriş Yap" : "Kayıt Ol",
                               style: const TextStyle(

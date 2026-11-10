@@ -4,11 +4,11 @@ import '../models/sensor_data.dart';
 import '../constants/colors.dart';
 
 class TelemetryMetricCheck {
-  final String parameter; // Toprak Nemi, Ortam Sıcaklığı, Işık Şiddeti
-  final String measuredValue; // %20, 24.0°C vb.
-  final String referenceRange; // %30 - %80, 18°C - 28°C vb.
-  final String statusLabel; // OPTİMAL, KRİTİK DÜŞÜK, YÜKSEK
-  final String technicalNote; // Kısa teknik açıklama
+  final String parameter;
+  final String measuredValue;
+  final String referenceRange;
+  final String statusLabel;
+  final String technicalNote;
   final Color statusColor;
   final IconData icon;
 
@@ -40,71 +40,80 @@ class SensorDiagnosticReport {
 }
 
 class PlantIntelligence {
-  // 1. TEKNİK UYUM PUANI (Nem: 50p, Sıcaklık: 30p, Işık: 20p = Toplam 100p)
+  // 2.E: Bitkinin kendi profiline göre 100 üzerinden bilimsel sağlık skoru
   static int calculateHealthScore(Plant plant, SensorData? sensor) {
     final double moisture = sensor?.moisture ?? plant.moistureLevel;
     final double temp = sensor?.temperature ?? plant.temperature;
     final double light = sensor?.light ?? plant.lightLevel;
 
-    // Nem Puanı (Max 50)
+    // 1. Nem Uyumu (Max 50p -> plant.minMoisture ile plant.maxMoisture arası)
     double moistureScore = 50.0;
     if (moisture < plant.minMoisture) {
       final diff = plant.minMoisture - moisture;
       moistureScore = (50.0 - (diff * 2.0)).clamp(0.0, 50.0);
-    } else if (moisture > 80.0) {
-      final diff = moisture - 80.0;
+    } else if (moisture > plant.maxMoisture) {
+      final diff = moisture - plant.maxMoisture;
       moistureScore = (50.0 - (diff * 1.5)).clamp(10.0, 50.0);
     }
 
-    // Sıcaklık Puanı (Max 30, Referans: 18°C - 28°C)
+    // 2. Sıcaklık Uyumu (Max 30p -> plant.minTemp ile plant.maxTemp arası)
     double tempScore = 30.0;
-    if (temp < 18.0) {
-      tempScore = (30.0 - ((18.0 - temp) * 3.0)).clamp(0.0, 30.0);
-    } else if (temp > 28.0) {
-      tempScore = (30.0 - ((temp - 28.0) * 3.0)).clamp(0.0, 30.0);
+    if (temp < plant.minTemp) {
+      tempScore = (30.0 - ((plant.minTemp - temp) * 3.0)).clamp(0.0, 30.0);
+    } else if (temp > plant.maxTemp) {
+      tempScore = (30.0 - ((temp - plant.maxTemp) * 3.0)).clamp(0.0, 30.0);
     }
 
-    // Işık Puanı (Max 20, Referans: %25 - %85)
+    // 3. Işık Uyumu (Max 20p -> plant.minLight ile plant.maxLight arası)
     double lightScore = 20.0;
-    if (light < 25.0) {
-      lightScore = (20.0 - (25.0 - light)).clamp(0.0, 20.0);
-    } else if (light > 85.0) {
-      lightScore = (20.0 - ((light - 85.0) * 0.8)).clamp(5.0, 20.0);
+    if (light < plant.minLight) {
+      lightScore = (20.0 - (plant.minLight - light)).clamp(0.0, 20.0);
+    } else if (light > plant.maxLight) {
+      lightScore = (20.0 - ((light - plant.maxLight) * 0.8)).clamp(5.0, 20.0);
     }
 
     return (moistureScore + tempScore + lightScore).round().clamp(0, 100);
   }
 
-  // 2. PARAMETRE BAZLI TEKNİK TANILAMA TABLOSU
+  // 2.E & 3.2: Bitkiye özel referans aralıklarıyla açıklayıcı parametre değerlendirmesi
   static List<TelemetryMetricCheck> evaluateParameters(Plant plant, SensorData? sensor) {
     final double moisture = sensor?.moisture ?? plant.moistureLevel;
     final double temp = sensor?.temperature ?? plant.temperature;
     final double light = sensor?.light ?? plant.lightLevel;
 
+    final int? minsAgo = sensor != null
+        ? DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(sensor.lastUpdate)).inMinutes
+        : null;
+    final String syncNote = minsAgo == null
+        ? "Varsayılan kayıt değeri."
+        : (minsAgo < 1 ? "Sensör az önce güncellendi." : "Sensör $minsAgo dk önce güncellendi.");
+
     final List<TelemetryMetricCheck> checks = [];
 
-    // A. Toprak Nemi Analizi
+    // A. Toprak Nemi
+    final String moistureRange = "%${plant.minMoisture} – %${plant.maxMoisture}";
     if (moisture < plant.minMoisture) {
-      final deficit = (plant.minMoisture - moisture).toInt();
       checks.add(
         TelemetryMetricCheck(
-          parameter: "Toprak Nemi",
+          parameter: "Toprak Nemi (${plant.type})",
           measuredValue: "%${moisture.toInt()}",
-          referenceRange: "%${plant.minMoisture} – %80",
+          referenceRange: moistureRange,
           statusLabel: "KRİTİK DÜŞÜK",
-          technicalNote: "Alt eşik değerinin %$deficit altında. Sulama döngüsü başlatılmalı.",
+          technicalNote:
+              "Toprak nemi %${moisture.toInt()}. Bitkinin minimum gereksinimi %${plant.minMoisture}. $syncNote Sulama önerilir.",
           statusColor: AppColors.statusCritical,
           icon: Icons.water_drop_outlined,
         ),
       );
-    } else if (moisture > 80.0) {
+    } else if (moisture > plant.maxMoisture) {
       checks.add(
         TelemetryMetricCheck(
-          parameter: "Toprak Nemi",
+          parameter: "Toprak Nemi (${plant.type})",
           measuredValue: "%${moisture.toInt()}",
-          referenceRange: "%${plant.minMoisture} – %80",
-          statusLabel: "DOYGUN / YÜKSEK",
-          technicalNote: "Toprak su doygunluğu yüksek. Drenaj kontrol edilmeli, sulama kapalı tutulmalı.",
+          referenceRange: moistureRange,
+          statusLabel: "YÜKSEK",
+          technicalNote:
+              "Toprak nemi üst sınırın (%${plant.maxMoisture}) üzerinde. $syncNote Toprak kuruyana kadar sulama yapılmamalı.",
           statusColor: Colors.orange,
           icon: Icons.water_drop_outlined,
         ),
@@ -112,38 +121,41 @@ class PlantIntelligence {
     } else {
       checks.add(
         TelemetryMetricCheck(
-          parameter: "Toprak Nemi",
+          parameter: "Toprak Nemi (${plant.type})",
           measuredValue: "%${moisture.toInt()}",
-          referenceRange: "%${plant.minMoisture} – %80",
+          referenceRange: moistureRange,
           statusLabel: "OPTİMAL",
-          technicalNote: "Nem seviyesi belirlenen referans sınırları içerisinde.",
+          technicalNote: "Toprak nemi ${plant.type} profilinin ideal aralığında. $syncNote",
           statusColor: AppColors.statusGood,
           icon: Icons.water_drop_outlined,
         ),
       );
     }
 
-    // B. Ortam Sıcaklığı Analizi
-    if (temp > 28.0) {
+    // B. Ortam Sıcaklığı
+    final String tempRange = "${plant.minTemp.toStringAsFixed(0)}°C – ${plant.maxTemp.toStringAsFixed(0)}°C";
+    if (temp > plant.maxTemp) {
       checks.add(
         TelemetryMetricCheck(
           parameter: "Ortam Sıcaklığı",
           measuredValue: "${temp.toStringAsFixed(1)}°C",
-          referenceRange: "18.0°C – 28.0°C",
+          referenceRange: tempRange,
           statusLabel: "YÜKSEK",
-          technicalNote: "Yüksek sıcaklık nedeniyle topraktaki buharlaşma hızı artabilir.",
+          technicalNote:
+              "Sıcaklık ${plant.type} için önerilen ${plant.maxTemp.toStringAsFixed(0)}°C sınırının üzerinde. Buharlaşma hızı artabilir.",
           statusColor: Colors.orange,
           icon: Icons.thermostat_outlined,
         ),
       );
-    } else if (temp < 18.0) {
+    } else if (temp < plant.minTemp) {
       checks.add(
         TelemetryMetricCheck(
           parameter: "Ortam Sıcaklığı",
           measuredValue: "${temp.toStringAsFixed(1)}°C",
-          referenceRange: "18.0°C – 28.0°C",
+          referenceRange: tempRange,
           statusLabel: "DÜŞÜK",
-          technicalNote: "Sıcaklık referans değerin altında. Kök su tüketimi yavaşlayabilir.",
+          technicalNote:
+              "Sıcaklık ${plant.type} için minimum ${plant.minTemp.toStringAsFixed(0)}°C sınırının altında.",
           statusColor: Colors.blue,
           icon: Icons.thermostat_outlined,
         ),
@@ -153,25 +165,40 @@ class PlantIntelligence {
         TelemetryMetricCheck(
           parameter: "Ortam Sıcaklığı",
           measuredValue: "${temp.toStringAsFixed(1)}°C",
-          referenceRange: "18.0°C – 28.0°C",
+          referenceRange: tempRange,
           statusLabel: "OPTİMAL",
-          technicalNote: "Termal koşullar bitki gelişimi için standart aralıkta.",
+          technicalNote: "Sıcaklık değeri bitki profiliyle tam uyumlu.",
           statusColor: AppColors.statusGood,
           icon: Icons.thermostat_outlined,
         ),
       );
     }
 
-    // C. Işık Şiddeti Analizi
-    if (light < 25.0) {
+    // C. Işık Şiddeti
+    final String lightRange = "%${plant.minLight.toInt()} – %${plant.maxLight.toInt()}";
+    if (light < plant.minLight) {
       checks.add(
         TelemetryMetricCheck(
           parameter: "Işık Şiddeti",
           measuredValue: "%${light.toInt()}",
-          referenceRange: "%25 – %85",
-          statusLabel: "YETERSİZ",
-          technicalNote: "Günlük ışık maruziyeti düşük.",
+          referenceRange: lightRange,
+          statusLabel: "DÜŞÜK",
+          technicalNote:
+              "Işık seviyesi ${plant.type} için gereken minimum %${plant.minLight.toInt()} değerinin altında.",
           statusColor: Colors.amber.shade700,
+          icon: Icons.wb_sunny_outlined,
+        ),
+      );
+    } else if (light > plant.maxLight) {
+      checks.add(
+        TelemetryMetricCheck(
+          parameter: "Işık Şiddeti",
+          measuredValue: "%${light.toInt()}",
+          referenceRange: lightRange,
+          statusLabel: "YÜKSEK",
+          technicalNote:
+              "Işık seviyesi maksimum %${plant.maxLight.toInt()} sınırının üzerinde. Doğrudan güneş yaprak yanığı yapabilir.",
+          statusColor: Colors.orange,
           icon: Icons.wb_sunny_outlined,
         ),
       );
@@ -180,9 +207,9 @@ class PlantIntelligence {
         TelemetryMetricCheck(
           parameter: "Işık Şiddeti",
           measuredValue: "%${light.toInt()}",
-          referenceRange: "%25 – %85",
+          referenceRange: lightRange,
           statusLabel: "OPTİMAL",
-          technicalNote: "Işık seviyesi yeterli düzeyde.",
+          technicalNote: "Günlük ışık seviyesi bitki profiliyle uyumlu.",
           statusColor: AppColors.statusGood,
           icon: Icons.wb_sunny_outlined,
         ),
@@ -192,7 +219,6 @@ class PlantIntelligence {
     return checks;
   }
 
-  // 3. DONANIM VE SENSÖR TANILAMA (Sensor Diagnostics)
   static SensorDiagnosticReport diagnoseSensor(String sensorId, SensorData? sensor) {
     if (sensorId.isEmpty) {
       return const SensorDiagnosticReport(
@@ -206,9 +232,9 @@ class PlantIntelligence {
 
     if (sensor == null) {
       return SensorDiagnosticReport(
-        statusText: "VERİ YOK",
-        detailText: "'$sensorId' düğümünden paket alınamadı.",
-        latencyText: "Bekleniyor",
+        statusText: "BEKLENİYOR",
+        detailText: "'$sensorId' düğümünden henüz telemetri paketi alınmadı.",
+        latencyText: "Veri yok",
         isHealthy: false,
         badgeColor: Colors.orange,
       );
@@ -247,7 +273,6 @@ class PlantIntelligence {
     );
   }
 
-  // 4. BAHÇE GENEL UYUM ORTALAMASI
   static int calculateGardenAverageScore(
     List<Plant> plants,
     Map<String, SensorData> sensors,
