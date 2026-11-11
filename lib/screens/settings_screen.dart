@@ -4,6 +4,7 @@ import '../constants/colors.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/sensor_provider.dart';
+import '../widgets/device_health_sheet.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -321,6 +322,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 child: Column(
                   children: [
+                    _buildActionTile(
+                      icon: Icons.developer_board,
+                      title: "Cihaz Sağlık Merkezi (Device Health)",
+                      trailingText: "İncele",
+                      textColor: textColor,
+                      onTap: () => DeviceHealthSheet.show(context),
+                    ),
+                    Divider(height: 1, indent: 64, color: Colors.grey.withOpacity(0.15)),
                     _buildSwitchTile(
                       icon: Icons.memory,
                       title: "Gerçek ESP32 Donanım Modu",
