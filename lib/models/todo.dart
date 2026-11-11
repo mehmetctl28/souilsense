@@ -7,8 +7,9 @@ class Todo {
   final String? plantId;
   final String category; // Sulama, Gübreleme, Budama, Genel
   final String priority; // Düşük, Normal, Yüksek
-  final String dueDate; // Bugün, Yarın, Bu Hafta
-  final String description; // Otomatik görev nedeni veya ek açıklama
+  final int dueTimestamp; // Gerçek Unix timestamp (ms)
+  final int? completedAt; // Görevin tamamlandığı gerçek zaman (ms)
+  final String description;
 
   Todo({
     required this.id,
@@ -19,22 +20,57 @@ class Todo {
     this.plantId,
     this.category = 'Genel',
     this.priority = 'Normal',
-    this.dueDate = 'Bugün',
+    required this.dueTimestamp,
+    this.completedAt,
     this.description = '',
   });
 
+  DateTime get dueDateTime => DateTime.fromMillisecondsSinceEpoch(dueTimestamp);
+
+  String get formattedDueDate {
+    final dt = dueDateTime;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(dt.year, dt.month, dt.day);
+    final diffDays = target.difference(today).inDays;
+
+    final dayStr = dt.day.toString().padLeft(2, '0');
+    final monthStr = dt.month.toString().padLeft(2, '0');
+    final dateLabel = "$dayStr.$monthStr.${dt.year}";
+
+    if (diffDays == 0) return "Bugün ($dateLabel)";
+    if (diffDays == 1) return "Yarın ($dateLabel)";
+    if (diffDays == -1) return "Dün ($dateLabel)";
+    return dateLabel;
+  }
+
   factory Todo.fromMap(String id, Map<dynamic, dynamic> map) {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    int parsedDue = nowMs;
+
+    if (map['dueTimestamp'] is num) {
+      parsedDue = (map['dueTimestamp'] as num).toInt();
+    } else if (map['dueDate'] is String) {
+      final raw = map['dueDate'].toString();
+      if (raw == 'Yarın') {
+        parsedDue = DateTime.now().add(const Duration(days: 1)).millisecondsSinceEpoch;
+      } else if (raw == 'Bu Hafta') {
+        parsedDue = DateTime.now().add(const Duration(days: 7)).millisecondsSinceEpoch;
+      }
+    }
+
     return Todo(
       id: id,
-      userId: map['userId'] ?? '',
-      title: map['title'] ?? '',
-      isCompleted: map['isCompleted'] ?? false,
-      isAuto: map['isAuto'] ?? false,
-      plantId: map['plantId'],
-      category: map['category'] ?? (map['isAuto'] == true ? 'Sulama' : 'Genel'),
-      priority: map['priority'] ?? (map['isAuto'] == true ? 'Yüksek' : 'Normal'),
-      dueDate: map['dueDate'] ?? 'Bugün',
-      description: map['description'] ?? '',
+      userId: (map['userId'] ?? '').toString(),
+      title: (map['title'] ?? '').toString(),
+      isCompleted: map['isCompleted'] == true,
+      isAuto: map['isAuto'] == true,
+      plantId: map['plantId']?.toString(),
+      category: (map['category'] ?? (map['isAuto'] == true ? 'Sulama' : 'Genel')).toString(),
+      priority: (map['priority'] ?? (map['isAuto'] == true ? 'Yüksek' : 'Normal')).toString(),
+      dueTimestamp: parsedDue,
+      completedAt: map['completedAt'] is num ? (map['completedAt'] as num).toInt() : null,
+      description: (map['description'] ?? '').toString(),
     );
   }
 
@@ -47,7 +83,8 @@ class Todo {
       'plantId': plantId,
       'category': category,
       'priority': priority,
-      'dueDate': dueDate,
+      'dueTimestamp': dueTimestamp,
+      if (completedAt != null) 'completedAt': completedAt,
       'description': description,
     };
   }

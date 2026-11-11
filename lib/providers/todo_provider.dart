@@ -13,7 +13,14 @@ class TodoProvider extends ChangeNotifier {
   List<Todo> _todos = [];
   List<Todo> get todos => _todos;
 
-  bool _useLegacyPath = false;
+  // Aktif, Otomatik Geçmiş ve Manuel Geçmiş listeleri ayrı sunulur
+  List<Todo> get activeTodos => _todos.where((t) => !t.isCompleted).toList();
+  List<Todo> get completedAutoTodos =>
+      _todos.where((t) => t.isCompleted && t.isAuto).toList();
+  List<Todo> get completedManualTodos =>
+      _todos.where((t) => t.isCompleted && !t.isAuto).toList();
+
+  bool _isInitialLoadComplete = false;
   bool _isSyncingAuto = false;
   String _lastEvaluatedSignature = '';
 
@@ -25,9 +32,6 @@ class TodoProvider extends ChangeNotifier {
   }
 
   DatabaseReference _userTodosRef(String userId) {
-    if (_useLegacyPath) {
-      return _rootRef.child('todos');
-    }
     return _rootRef.child('users').child(userId).child('todos');
   }
 
@@ -43,6 +47,7 @@ class TodoProvider extends ChangeNotifier {
 
   void _listenToTodos(String userId) {
     _todosSubscription?.cancel();
+    _isInitialLoadComplete = false;
 
     _todosSubscription = _userTodosRef(userId).onValue.listen((event) {
       final data = event.snapshot.value;
@@ -51,20 +56,16 @@ class TodoProvider extends ChangeNotifier {
       if (data != null && data is Map) {
         data.forEach((key, value) {
           if (value is Map) {
-            final todo = Todo.fromMap(key.toString(), value);
-            if (!_useLegacyPath || todo.userId == userId) {
-              loaded.add(todo);
-            }
+            loaded.add(Todo.fromMap(key.toString(), value));
           }
         });
       }
+      loaded.sort((a, b) => a.dueTimestamp.compareTo(b.dueTimestamp));
       _todos = loaded;
+      _isInitialLoadComplete = true;
       notifyListeners();
     }, onError: (error) {
-      if (!_useLegacyPath) {
-        _useLegacyPath = true;
-        _listenToTodos(userId);
-      }
+      debugPrint("Görev dinleme hatası: $error");
     });
   }
 
@@ -72,25 +73,23 @@ class TodoProvider extends ChangeNotifier {
     _todosSubscription?.cancel();
     _todosSubscription = null;
     _todos = [];
+    _isInitialLoadComplete = false;
     _lastEvaluatedSignature = '';
     notifyListeners();
   }
 
-  // 2.C: Yalnızca sensör nemi veya bitki eşiği değiştiğinde tetiklenir
   void onTelemetryOrPlantsUpdated(List<Plant> plants, Map<String, SensorData> sensors) {
-    if (plants.isEmpty) return;
+    if (!_isInitialLoadComplete) return;
 
     final buffer = StringBuffer();
     for (final p in plants) {
-      final m = sensors[p.sensorId]?.moisture ?? p.moistureLevel;
+      final m = (sensors[p.sensorId]?.moisture ?? p.moistureLevel).round();
       final isThirsty = m < p.minMoisture;
-      buffer.write('${p.id}:${p.minMoisture}:$isThirsty|');
+      buffer.write('${p.id}:${p.minMoisture}:$isThirsty:$m|');
     }
 
     final currentSignature = buffer.toString();
-    if (currentSignature == _lastEvaluatedSignature) {
-      return; // Hiçbir bitkinin eşik durumu değişmedi, gereksiz işlem yapma
-    }
+    if (currentSignature == _lastEvaluatedSignature) return;
 
     _lastEvaluatedSignature = currentSignature;
     syncAutoTasks(plants, sensors);
@@ -98,24 +97,39 @@ class TodoProvider extends ChangeNotifier {
 
   Future<void> syncAutoTasks(List<Plant> plants, [Map<String, SensorData>? sensors]) async {
     final userId = _auth.currentUser?.uid;
-    if (userId == null || _isSyncingAuto) return;
+    if (userId == null || !_isInitialLoadComplete || _isSyncingAuto) return;
 
     _isSyncingAuto = true;
     try {
-      for (var plant in plants) {
+      final activePlantIds = plants.map((p) => p.id).toSet();
+
+      // Bitki silindiyse ilişkili otomatik görevleri temizle
+      for (final t in List<Todo>.from(_todos)) {
+        if (t.isAuto && t.plantId != null && !activePlantIds.contains(t.plantId)) {
+          await _userTodosRef(userId).child(t.id).remove();
+        }
+      }
+
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+
+      for (final plant in plants) {
         final liveMoisture = sensors != null && sensors.containsKey(plant.sensorId)
             ? sensors[plant.sensorId]!.moisture
             : plant.moistureLevel;
 
         final bool isThirsty = liveMoisture < plant.minMoisture;
+        final String autoTaskKey = 'auto_water_${plant.id}';
 
         final existingActiveAutoTodo = _todos.firstWhere(
-          (t) => t.plantId == plant.id && t.isAuto && !t.isCompleted,
-          orElse: () => Todo(id: '', userId: '', title: ''),
+          (t) => (t.id == autoTaskKey || t.plantId == plant.id) && t.isAuto && !t.isCompleted,
+          orElse: () => Todo(id: '', userId: '', title: '', dueTimestamp: nowMs),
         );
 
+        final String updatedDesc =
+            'Toprak nemi %${liveMoisture.toInt()} seviyesinde (Alt eşik: %${plant.minMoisture}).';
+
         if (isThirsty && existingActiveAutoTodo.id.isEmpty) {
-          await _userTodosRef(userId).push().set({
+          await _userTodosRef(userId).child(autoTaskKey).set({
             'userId': userId,
             'title': 'Sula: ${plant.name}',
             'isCompleted': false,
@@ -123,15 +137,25 @@ class TodoProvider extends ChangeNotifier {
             'plantId': plant.id,
             'category': 'Sulama',
             'priority': 'Yüksek',
-            'dueDate': 'Bugün',
-            'description':
-                'Toprak nemi %${liveMoisture.toInt()} seviyesine düştü (Minimum sınır: %${plant.minMoisture}).',
+            'dueTimestamp': nowMs,
+            'description': updatedDesc,
+          });
+        } else if (isThirsty &&
+            existingActiveAutoTodo.id.isNotEmpty &&
+            existingActiveAutoTodo.description != updatedDesc) {
+          await _userTodosRef(userId).child(existingActiveAutoTodo.id).update({
+            'description': updatedDesc,
           });
         } else if (!isThirsty && existingActiveAutoTodo.id.isNotEmpty) {
-          await _userTodosRef(userId).child(existingActiveAutoTodo.id).update({
-            'isCompleted': true,
-            'description': 'Sulama tamamlandı, nem referans aralığına ulaştı.',
-          });
+          // Otomatik görevi silmek yerine arşiv/geçmiş için tamamlandı işaretler ve yeni arşiv kaydına taşır
+          final completedPayload = existingActiveAutoTodo.toMap()
+            ..['isCompleted'] = true
+            ..['completedAt'] = nowMs
+            ..['description'] =
+                'Sulama tamamlandı, nem %${liveMoisture.toInt()} ile referans aralığına ulaştı.';
+
+          await _userTodosRef(userId).push().set(completedPayload);
+          await _userTodosRef(userId).child(existingActiveAutoTodo.id).remove();
         }
       }
     } catch (e) {
@@ -145,35 +169,28 @@ class TodoProvider extends ChangeNotifier {
     String title, {
     String category = 'Sulama',
     String priority = 'Normal',
-    String dueDate = 'Bugün',
+    DateTime? dueDate,
     String description = '',
   }) async {
     final userId = _auth.currentUser?.uid;
     if (userId == null || title.trim().isEmpty) return false;
 
-    final payload = {
-      'userId': userId,
-      'title': title.trim(),
-      'isCompleted': false,
-      'isAuto': false,
-      'category': category,
-      'priority': priority,
-      'dueDate': dueDate,
-      'description': description,
-    };
+    final targetDate = dueDate ?? DateTime.now();
 
     try {
-      await _userTodosRef(userId).push().set(payload);
+      await _userTodosRef(userId).push().set({
+        'userId': userId,
+        'title': title.trim(),
+        'isCompleted': false,
+        'isAuto': false,
+        'category': category,
+        'priority': priority,
+        'dueTimestamp': targetDate.millisecondsSinceEpoch,
+        'description': description,
+      });
       return true;
     } catch (e) {
-      try {
-        _useLegacyPath = true;
-        await _rootRef.child('todos').push().set(payload);
-        _listenToTodos(userId);
-        return true;
-      } catch (inner) {
-        return false;
-      }
+      return false;
     }
   }
 
@@ -181,10 +198,11 @@ class TodoProvider extends ChangeNotifier {
     final userId = _auth.currentUser?.uid;
     if (userId == null) return;
     try {
-      await _userTodosRef(userId).child(todoId).update({'isCompleted': !currentStatus});
-    } catch (e) {
-      debugPrint("Görev güncelleme hatası: $e");
-    }
+      await _userTodosRef(userId).child(todoId).update({
+        'isCompleted': !currentStatus,
+        'completedAt': !currentStatus ? DateTime.now().millisecondsSinceEpoch : null,
+      });
+    } catch (_) {}
   }
 
   Future<void> deleteTodo(String todoId) async {
@@ -192,9 +210,7 @@ class TodoProvider extends ChangeNotifier {
     if (userId == null) return;
     try {
       await _userTodosRef(userId).child(todoId).remove();
-    } catch (e) {
-      debugPrint("Görev silme hatası: $e");
-    }
+    } catch (_) {}
   }
 
   @override

@@ -21,6 +21,94 @@ class PlantDetailScreen extends StatelessWidget {
     return "${diff.inDays} gün önce";
   }
 
+  Future<void> _showCalibrationDialog(
+    BuildContext context,
+    String sensorId,
+    SensorProvider sensorProvider,
+  ) async {
+    final config = sensorProvider.getSensorConfig(sensorId);
+    final liveSensor = sensorProvider.getSensor(sensorId);
+    final dryCtrl = TextEditingController(text: config.dryAdcValue.toString());
+    final wetCtrl = TextEditingController(text: config.wetAdcValue.toString());
+    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          "Sensör Kalibrasyon Sihirbazı ($sensorId)",
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: textColor),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                liveSensor?.rawAdc != null
+                    ? "Anlık Ham ADC: ${liveSensor!.rawAdc}"
+                    : "ESP32'den 'rawAdc' alanı geldiğinde otomatik yüzde dönüşümü uygulanır.",
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: dryCtrl,
+                keyboardType: TextInputType.number,
+                style: TextStyle(color: textColor),
+                decoration: const InputDecoration(
+                  labelText: "1. Kuru Toprak / Hava ADC Değeri (%0)",
+                  hintText: "Örn: 3200",
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: wetCtrl,
+                keyboardType: TextInputType.number,
+                style: TextStyle(color: textColor),
+                decoration: const InputDecoration(
+                  labelText: "2. Tam Islak Toprak ADC Değeri (%100)",
+                  hintText: "Örn: 1400",
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("İptal"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+            onPressed: () async {
+              final dry = int.tryParse(dryCtrl.text.trim()) ?? 3200;
+              final wet = int.tryParse(wetCtrl.text.trim()) ?? 1400;
+              if ((dry - wet).abs() < 200) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Kuru ve ıslak ADC değerleri arasında en az 200 fark olmalıdır."),
+                  ),
+                );
+                return;
+              }
+              await sensorProvider.saveSensorConfig(
+                SensorConfig(
+                  sensorId: sensorId,
+                  dryAdcValue: dry,
+                  wetAdcValue: wet,
+                  readIntervalSeconds: config.readIntervalSeconds,
+                  maxPumpSeconds: sensorProvider.maxPumpSeconds,
+                ),
+              );
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text("Kalibrasyonu Kaydet", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final plantProvider = Provider.of<PlantProvider>(context);
@@ -36,18 +124,41 @@ class PlantDetailScreen extends StatelessWidget {
     final double liveMoisture = liveSensor != null ? liveSensor.moisture : plant.moistureLevel;
     final double liveTemp = liveSensor != null ? liveSensor.temperature : plant.temperature;
     final double liveLight = liveSensor != null ? liveSensor.light : plant.lightLevel;
-    final bool isOnline = liveSensor != null && liveSensor.isOnline;
+    final bool isOnline = sensorProvider.isSensorOnline(plant.sensorId);
 
     final pumpState = sensorProvider.getPumpState(
       plant.sensorId,
       fallbackPumpOn: plant.isPumpOn,
     );
+    final telemetryPoints = sensorProvider.getTelemetryHistory(plant.sensorId);
     final historyValues = sensorProvider.getMoistureHistory(plant.sensorId, liveMoisture);
     final timelineEvents = sensorProvider.getTimeline(plant.sensorId, liveMoisture);
+    final wateringReport = sensorProvider.getWateringReport(plant.sensorId);
 
-    final int healthScore = PlantIntelligence.calculateHealthScore(plant, liveSensor);
-    final parameterChecks = PlantIntelligence.evaluateParameters(plant, liveSensor);
-    final sensorReport = PlantIntelligence.diagnoseSensor(plant.sensorId, liveSensor);
+    // 4. Bölüm: Veri tazeliği kontrollü Sağlık Skoru ve Plant Intelligence 2.0
+    final healthResult = PlantIntelligence.evaluateHealthScore(
+      plant,
+      liveSensor,
+      offlineTimeoutMinutes: sensorProvider.offlineTimeoutMinutes,
+    );
+    final dryingAnalysis = PlantIntelligence.analyzeDryingRate(
+      telemetryPoints,
+      liveMoisture,
+      plant.minMoisture,
+    );
+    final intelligenceCards = PlantIntelligence.buildIntelligenceV2(
+      plant: plant,
+      sensor: liveSensor,
+      history: telemetryPoints,
+      wateringReport: wateringReport,
+      offlineTimeoutMinutes: sensorProvider.offlineTimeoutMinutes,
+    );
+    final sensorReport = PlantIntelligence.diagnoseSensor(
+      plant.sensorId,
+      liveSensor,
+      history: telemetryPoints,
+      offlineTimeoutMinutes: sensorProvider.offlineTimeoutMinutes,
+    );
 
     PlantInfo? matchedCatalog;
     for (final item in PlantData.catalog) {
@@ -68,9 +179,9 @@ class PlantDetailScreen extends StatelessWidget {
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Column(
           children: [
-            // 1. ÜST KAPAK GÖRSELİ
+            // 1. ÜST KAPAK GÖRSELİ + VERİ TAZELİĞİ ROZETİ
             SizedBox(
-              height: 230,
+              height: 235,
               width: double.infinity,
               child: Stack(
                 fit: StackFit.expand,
@@ -89,7 +200,7 @@ class PlantDetailScreen extends StatelessWidget {
                         end: Alignment.bottomCenter,
                         colors: [
                           Colors.black.withOpacity(0.25),
-                          Colors.black.withOpacity(0.70),
+                          Colors.black.withOpacity(0.72),
                         ],
                       ),
                     ),
@@ -110,18 +221,23 @@ class PlantDetailScreen extends StatelessWidget {
                               onPressed: () => Navigator.pop(context),
                             ),
                           ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.45),
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Text(
-                              "Eşik Uyumu: %$healthScore",
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
+                          Flexible(
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(horizontal: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.50),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Text(
+                                healthResult.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: healthResult.isFresh ? Colors.white : Colors.orangeAccent,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                           ),
@@ -191,7 +307,7 @@ class PlantDetailScreen extends StatelessWidget {
               ),
             ),
 
-            // 2. SEKMELER (Analiz | Tanılama | Rehber)
+            // 2. SEKMELER
             Container(
               color: Theme.of(context).scaffoldBackgroundColor,
               child: TabBar(
@@ -202,7 +318,7 @@ class PlantDetailScreen extends StatelessWidget {
                 labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 tabs: const [
                   Tab(icon: Icon(Icons.bar_chart_outlined), text: "Analiz"),
-                  Tab(icon: Icon(Icons.analytics_outlined), text: "Tanılama"),
+                  Tab(icon: Icon(Icons.psychology_outlined), text: "Zekâ 2.0"),
                   Tab(icon: Icon(Icons.menu_book_outlined), text: "Rehber"),
                 ],
               ),
@@ -212,7 +328,7 @@ class PlantDetailScreen extends StatelessWidget {
             Expanded(
               child: TabBarView(
                 children: [
-                  // SEKME 1: ANALİZ VE POMPA KONTROLÜ (Overflow Giderildi)
+                  // SEKME 1: ANALİZ + KURUMA HIZI + GERÇEK ZAMAN SERİSİ GRAFİĞİ
                   ListView(
                     physics: const BouncingScrollPhysics(),
                     padding: EdgeInsets.fromLTRB(20, 20, 20, bottomPadding),
@@ -231,7 +347,7 @@ class PlantDetailScreen extends StatelessWidget {
                                 _buildStatItem(
                                   Icons.water_drop,
                                   "%${liveMoisture.toInt()}",
-                                  "Nem (Eşik %${plant.minMoisture})",
+                                  "Nem (%${plant.minMoisture}-${plant.maxMoisture})",
                                   textColor,
                                 ),
                                 _buildVerticalDivider(),
@@ -252,11 +368,37 @@ class PlantDetailScreen extends StatelessWidget {
                                 ),
                               ],
                             ),
+                            const SizedBox(height: 14),
+                            // 3.2: Saatlik Kuruma Hızı Bilgi Bandı
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.hourglass_bottom,
+                                      size: 16, color: AppColors.primary),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      dryingAnalysis.summary,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: textColor,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                             const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 16),
+                              padding: EdgeInsets.symmetric(vertical: 14),
                               child: Divider(height: 1),
                             ),
-                            // Manuel Pompa Kontrol Satırı
                             Row(
                               children: [
                                 Expanded(
@@ -273,7 +415,7 @@ class PlantDetailScreen extends StatelessWidget {
                                       ),
                                       const SizedBox(height: 3),
                                       Text(
-                                        "Cihaz Durumu: ${pumpState.actualState ? 'Çalışıyor' : 'Kapalı'} • Komut: ${pumpState.requestedState ? 'Açık (${pumpState.maxDurationSeconds}sn)' : 'Beklemede'}",
+                                        "Cihaz: ${pumpState.actualState ? 'Çalışıyor' : 'Kapalı'} • Komut: ${pumpState.requestedState ? 'Açık (${pumpState.maxDurationSeconds}sn)' : 'Beklemede'}",
                                         style: const TextStyle(color: Colors.grey, fontSize: 12),
                                       ),
                                     ],
@@ -295,7 +437,6 @@ class PlantDetailScreen extends StatelessWidget {
                               ],
                             ),
                             const Divider(height: 20),
-                            // Otomatik Sulama Satırı (Expanded ile Overflow Korumalı)
                             Row(
                               children: [
                                 Expanded(
@@ -337,26 +478,54 @@ class PlantDetailScreen extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 20),
+                      // 3.1: Gerçek Zaman Serisi ve Sulama Etki Raporu Bağlandı
                       MoistureChart(
                         currentMoisture: liveMoisture,
                         currentTemp: liveTemp,
                         currentLight: liveLight,
                         historyValues: historyValues,
+                        telemetryPoints: telemetryPoints,
+                        wateringEvents: timelineEvents,
+                        wateringReport: wateringReport,
                       ),
                     ],
                   ),
 
-                  // SEKME 2: TEKNİK TANILAMA (Eşik Analizi + Donanım Durumu + Kayıtlar)
+                  // SEKME 2: PLANT INTELLIGENCE 2.0 (6 Çekirdek Analiz Modülü + Kalibrasyon)
                   ListView(
                     physics: const BouncingScrollPhysics(),
                     padding: EdgeInsets.fromLTRB(20, 20, 20, bottomPadding),
                     children: [
-                      Text(
-                        "Sensör Parametre & Eşik Analizi",
-                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: textColor),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              "Plant Intelligence 2.0 Analizi",
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                                color: textColor,
+                              ),
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () =>
+                                _showCalibrationDialog(context, plant.sensorId, sensorProvider),
+                            icon: const Icon(Icons.tune, size: 16, color: AppColors.primary),
+                            label: const Text(
+                              "ADC Kalibre Et",
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 12),
-                      ...parameterChecks.map((check) {
+                      const SizedBox(height: 8),
+                      ...intelligenceCards.map((card) {
                         return Container(
                           margin: const EdgeInsets.only(bottom: 12),
                           padding: const EdgeInsets.all(16),
@@ -369,123 +538,51 @@ class PlantDetailScreen extends StatelessWidget {
                             children: [
                               Row(
                                 children: [
-                                  Icon(check.icon, color: check.statusColor, size: 20),
+                                  Icon(card.icon, color: card.color, size: 20),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
-                                      check.parameter,
+                                      "${card.title} (${card.category})",
                                       style: TextStyle(
                                         fontWeight: FontWeight.bold,
-                                        fontSize: 15,
+                                        fontSize: 14,
                                         color: textColor,
                                       ),
                                     ),
                                   ),
+                                  const SizedBox(width: 6),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                     decoration: BoxDecoration(
-                                      color: check.statusColor.withOpacity(0.12),
+                                      color: card.color.withOpacity(0.12),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
-                                      check.statusLabel,
+                                      card.badgeText,
                                       style: TextStyle(
-                                        fontSize: 11,
+                                        fontSize: 10,
                                         fontWeight: FontWeight.bold,
-                                        color: check.statusColor,
+                                        color: card.color,
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 10),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    "Ölçülen: ${check.measuredValue}",
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: textColor,
-                                    ),
-                                  ),
-                                  Text(
-                                    "Referans: ${check.referenceRange}",
-                                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
+                              const SizedBox(height: 8),
                               Text(
-                                check.technicalNote,
-                                style: const TextStyle(fontSize: 12, color: Colors.grey, height: 1.4),
+                                card.detail,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                  height: 1.4,
+                                ),
                               ),
                             ],
                           ),
                         );
                       }),
 
-                      const SizedBox(height: 12),
-                      Text(
-                        "Donanım & Telemetri Durumu",
-                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: textColor),
-                      ),
-                      const SizedBox(height: 10),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: cardColor,
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    "ESP32 Düğümü: ${plant.sensorId}",
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                      color: textColor,
-                                    ),
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: sensorReport.badgeColor.withOpacity(0.12),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    sensorReport.statusText,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: sensorReport.badgeColor,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              "Son Paket: ${sensorReport.latencyText}",
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              sensorReport.detailText,
-                              style: const TextStyle(fontSize: 12, color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 14),
                       Text(
                         "Kayıt Geçmişi (System Log)",
                         style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: textColor),
@@ -579,23 +676,22 @@ class PlantDetailScreen extends StatelessWidget {
                       const SizedBox(height: 20),
                       _buildCareCard(
                         Icons.water_drop_outlined,
-                        "Sulama",
-                        matchedCatalog?.watering ??
-                            "Toprak nemi %${plant.minMoisture} altına düştüğünde sulayın.",
+                        "Sulama Aralığı",
+                        "İdeal Nem: %${plant.minMoisture} – %${plant.maxMoisture}. ${matchedCatalog?.watering ?? ''}",
                         cardColor,
                         textColor,
                       ),
                       _buildCareCard(
                         Icons.wb_sunny_outlined,
                         "Işık İhtiyacı",
-                        matchedCatalog?.light ?? "Aydınlık, dolaylı gün ışığı alan bir konum tercih edin.",
+                        "İdeal Işık: %${plant.minLight.toInt()} – %${plant.maxLight.toInt()}. ${matchedCatalog?.light ?? ''}",
                         cardColor,
                         textColor,
                       ),
                       _buildCareCard(
                         Icons.thermostat_outlined,
-                        "Sıcaklık",
-                        matchedCatalog?.temperature ?? "18°C - 26°C arası oda sıcaklığı idealdir.",
+                        "Sıcaklık Aralığı",
+                        "İdeal Sıcaklık: ${plant.minTemp.toInt()}°C – ${plant.maxTemp.toInt()}°C. ${matchedCatalog?.temperature ?? ''}",
                         cardColor,
                         textColor,
                       ),

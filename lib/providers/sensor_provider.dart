@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/sensor_data.dart';
+import '../models/plant.dart';
 
 class PumpCommandState {
   final bool requestedState;
@@ -49,40 +51,439 @@ class TimelineEvent {
     required this.timestamp,
     this.type = 'sensor',
   });
+
+  factory TimelineEvent.fromMap(String sensorId, Map<dynamic, dynamic> map, {String? forcedType}) {
+    return TimelineEvent(
+      sensorId: sensorId,
+      title: (map['title'] ?? '').toString(),
+      subtitle: (map['subtitle'] ?? '').toString(),
+      timestamp: SensorData.parseSafeInt(
+        map['timestamp'],
+        fallback: DateTime.now().millisecondsSinceEpoch,
+      ),
+      type: forcedType ?? (map['type'] ?? 'sensor').toString(),
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'title': title,
+      'subtitle': subtitle,
+      'timestamp': timestamp,
+      'type': type,
+    };
+  }
 }
 
 class SensorProvider extends ChangeNotifier {
   static const String _hardwareModePrefKey = 'is_hardware_mode';
   final DatabaseReference _db = FirebaseDatabase.instance.ref();
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   final Map<String, SensorData> _hardwareSensors = {};
   final Map<String, SensorData> _simulatedSensors = {};
   final Map<String, PumpCommandState> _pumpStates = {};
   final Map<String, SensorConfig> _sensorConfigs = {};
-  final Map<String, List<double>> _moistureHistory = {};
-  final Map<String, List<TimelineEvent>> _timelines = {};
+
+  // 5.2: 3 ayrı kalıcı geçmiş katmanı (sensorHistory, wateringEvents, alerts)
+  final Map<String, List<TelemetryPoint>> _telemetryHistory = {};
+  final Map<String, List<TimelineEvent>> _wateringEvents = {};
+  final Map<String, List<TimelineEvent>> _alertEvents = {};
+
+  final Map<String, WateringEffectivenessReport> _wateringReports = {};
+  final Map<String, double> _preWateringMoisture = {};
   final Map<String, Timer> _pumpWatchdogTimers = {};
 
-  bool _isHardwareMode = false;
+  final Map<String, StreamSubscription<DatabaseEvent>> _sensorSubs = {};
+  final Map<String, StreamSubscription<DatabaseEvent>> _pumpSubs = {};
+  final Map<String, StreamSubscription<DatabaseEvent>> _configSubs = {};
+  Map<String, Plant> _authorizedPlantsBySensor = {};
+
+  final Map<String, int> _lastAutoWateringTimestamp = {};
+  final Map<String, int> _dailyAutoWateringCount = {};
+
+  // 5.3: Gerçek bildirim akışı (Notifications açıkken arayüzde anlık uyarı tetikler)
+  final StreamController<TimelineEvent> _alertStreamController =
+      StreamController<TimelineEvent>.broadcast();
+  Stream<TimelineEvent> get alertStream => _alertStreamController.stream;
+
+  bool _isHardwareMode;
+  bool _notificationsEnabled = true;
+  int _maxPumpSeconds;
+  int _offlineTimeoutMinutes;
+
   bool get isHardwareMode => _isHardwareMode;
+  bool get notificationsEnabled => _notificationsEnabled;
+  int get maxPumpSeconds => _maxPumpSeconds;
+  int get offlineTimeoutMinutes => _offlineTimeoutMinutes;
 
   Map<String, SensorData> get sensors =>
-      _isHardwareMode ? _hardwareSensors : {..._simulatedSensors, ..._hardwareSensors};
+      _isHardwareMode ? _hardwareSensors : {..._hardwareSensors, ..._simulatedSensors};
 
-  StreamSubscription<DatabaseEvent>? _sensorsSubscription;
-  StreamSubscription<DatabaseEvent>? _pumpSubscription;
-  StreamSubscription<DatabaseEvent>? _configSubscription;
+  int get connectedHardwareSensorCount => _hardwareSensors.values
+      .where((s) => s.isOnlineWithThreshold(_offlineTimeoutMinutes))
+      .length;
 
-  SensorProvider() {
-    _loadModePreference();
-    _listenToSensors();
-    _listenToPumpCommands();
-    _listenToSensorConfigs();
+  int? get lastHardwareUpdateTimestamp {
+    if (_hardwareSensors.isEmpty) return null;
+    int latest = 0;
+    for (final s in _hardwareSensors.values) {
+      if (s.lastUpdate > latest) latest = s.lastUpdate;
+    }
+    return latest > 0 ? latest : null;
   }
 
-  Future<void> _loadModePreference() async {
+  StreamSubscription<DatabaseEvent>? _wateringHistorySub;
+  StreamSubscription<DatabaseEvent>? _alertsHistorySub;
+  StreamSubscription<DatabaseEvent>? _userSensorHistorySub;
+  StreamSubscription<User?>? _authSubscription;
+
+  SensorProvider({
+    bool initialHardwareMode = false,
+    int initialMaxPumpSeconds = 15,
+    int initialOfflineMinutes = 30,
+  })  : _isHardwareMode = initialHardwareMode,
+        _maxPumpSeconds = initialMaxPumpSeconds,
+        _offlineTimeoutMinutes = initialOfflineMinutes {
+    reloadSafetySettings();
+    _authSubscription = _auth.authStateChanges().listen((user) {
+      if (user != null) {
+        _listenToSeparatedUserHistories(user.uid);
+      } else {
+        _clearAllSubscriptions();
+      }
+    });
+  }
+
+  void _clearAllSubscriptions() {
+    for (final sub in _sensorSubs.values) {
+      sub.cancel();
+    }
+    for (final sub in _pumpSubs.values) {
+      sub.cancel();
+    }
+    for (final sub in _configSubs.values) {
+      sub.cancel();
+    }
+    _sensorSubs.clear();
+    _pumpSubs.clear();
+    _configSubs.clear();
+    _wateringHistorySub?.cancel();
+    _alertsHistorySub?.cancel();
+    _userSensorHistorySub?.cancel();
+    _authorizedPlantsBySensor.clear();
+    _hardwareSensors.clear();
+    _simulatedSensors.clear();
+    _pumpStates.clear();
+    _wateringEvents.clear();
+    _alertEvents.clear();
+    _telemetryHistory.clear();
+    notifyListeners();
+  }
+
+  // 5.2: Firebase'de wateringEvents, alerts ve sensorHistory düğümlerini ayrı ayrı dinler
+  void _listenToSeparatedUserHistories(String userId) {
+    _wateringHistorySub?.cancel();
+    _alertsHistorySub?.cancel();
+    _userSensorHistorySub?.cancel();
+
+    final userRef = _db.child('users').child(userId);
+
+    _wateringHistorySub = userRef.child('wateringEvents').onValue.listen((event) {
+      final data = event.snapshot.value;
+      if (data is Map) {
+        data.forEach((sensorKey, evMap) {
+          if (evMap is Map) {
+            final sId = sensorKey.toString();
+            final List<TimelineEvent> list = [];
+            evMap.forEach((_, val) {
+              if (val is Map) {
+                list.add(TimelineEvent.fromMap(sId, val, forcedType: 'watering'));
+              }
+            });
+            list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+            _wateringEvents[sId] = list;
+          }
+        });
+        notifyListeners();
+      }
+    }, onError: (_) {});
+
+    _alertsHistorySub = userRef.child('alerts').onValue.listen((event) {
+      final data = event.snapshot.value;
+      if (data is Map) {
+        data.forEach((sensorKey, evMap) {
+          if (evMap is Map) {
+            final sId = sensorKey.toString();
+            final List<TimelineEvent> list = [];
+            evMap.forEach((_, val) {
+              if (val is Map) {
+                list.add(TimelineEvent.fromMap(sId, val, forcedType: 'alert'));
+              }
+            });
+            list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+            _alertEvents[sId] = list;
+          }
+        });
+        notifyListeners();
+      }
+    }, onError: (_) {});
+
+    _userSensorHistorySub = userRef.child('sensorHistory').onValue.listen((event) {
+      final data = event.snapshot.value;
+      if (data is Map) {
+        data.forEach((sensorKey, tsMap) {
+          if (tsMap is Map) {
+            final sId = sensorKey.toString();
+            final List<TelemetryPoint> points = [];
+            tsMap.forEach((tsKey, val) {
+              final ts = SensorData.normalizeTimestamp(tsKey);
+              if (val is Map && ts > 0) {
+                points.add(TelemetryPoint.fromMap(ts, val));
+              }
+            });
+            points.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+            if (points.isNotEmpty) {
+              _telemetryHistory[sId] =
+                  points.length > 30 ? points.sublist(points.length - 30) : points;
+            }
+          }
+        });
+        notifyListeners();
+      }
+    }, onError: (_) {});
+  }
+
+  void syncAuthorizedPlants(List<Plant> userPlants) {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    final Map<String, Plant> nextMap = {};
+    for (final plant in userPlants) {
+      final sId = plant.sensorId.trim();
+      if (sId.isNotEmpty) {
+        nextMap[sId] = plant;
+      }
+    }
+    _authorizedPlantsBySensor = nextMap;
+
+    final removedIds = _sensorSubs.keys.where((id) => !nextMap.containsKey(id)).toList();
+    for (final id in removedIds) {
+      _sensorSubs.remove(id)?.cancel();
+      _pumpSubs.remove(id)?.cancel();
+      _configSubs.remove(id)?.cancel();
+      _hardwareSensors.remove(id);
+      _simulatedSensors.remove(id);
+    }
+
+    for (final entry in nextMap.entries) {
+      final sId = entry.key;
+      final plant = entry.value;
+      if (!_sensorSubs.containsKey(sId)) {
+        _claimAndSubscribeSensor(user.uid, sId, plant);
+      }
+    }
+  }
+
+  Future<void> _claimAndSubscribeSensor(String uid, String sensorId, Plant plant) async {
+    try {
+      await _db.child('sensorOwners').child(sensorId).set(uid);
+      await _db.child('sensorConfigs').child(sensorId).update({
+        'ownerUid': uid,
+        'minMoisture': plant.minMoisture,
+        'maxMoisture': plant.maxMoisture,
+        'maxPumpSeconds': _maxPumpSeconds,
+        'hardwareMode': _isHardwareMode,
+      });
+    } catch (_) {}
+
+    _configSubs[sensorId] = _db.child('sensorConfigs').child(sensorId).onValue.listen((event) {
+      if (event.snapshot.value is Map) {
+        _sensorConfigs[sensorId] =
+            SensorConfig.fromMap(sensorId, event.snapshot.value as Map);
+        notifyListeners();
+      }
+    }, onError: (_) {});
+
+    _pumpSubs[sensorId] = _db.child('pumpCommands').child(sensorId).onValue.listen((event) {
+      if (event.snapshot.value is Map) {
+        final state = PumpCommandState.fromMap(event.snapshot.value as Map);
+        _pumpStates[sensorId] = state;
+        if (state.actualState == state.requestedState) {
+          _pumpWatchdogTimers[sensorId]?.cancel();
+        }
+        notifyListeners();
+      }
+    }, onError: (_) {});
+
+    _sensorSubs[sensorId] = _db.child('sensors').child(sensorId).onValue.listen((event) {
+      final value = event.snapshot.value;
+      if (value is Map) {
+        _onSingleSensorData(sensorId, value);
+      }
+    }, onError: (_) {});
+  }
+
+  void _onSingleSensorData(String sensorId, Map<dynamic, dynamic> value) {
+    final config = _sensorConfigs[sensorId];
+    final Map<dynamic, dynamic> currentMap =
+        (value['current'] is Map) ? value['current'] as Map : value;
+    final parsed = SensorData.fromMap(
+      sensorId,
+      currentMap,
+      config: config,
+      isSimulated: false,
+    );
+    _hardwareSensors[sensorId] = parsed;
+
+    if (_preWateringMoisture.containsKey(sensorId)) {
+      final pre = _preWateringMoisture.remove(sensorId)!;
+      final report = WateringEffectivenessReport(
+        sensorId: sensorId,
+        preMoisture: pre,
+        postMoisture: parsed.moisture,
+        timestamp: parsed.lastUpdate,
+      );
+      _wateringReports[sensorId] = report;
+
+      if (!report.isEffective) {
+        _recordSeparatedEvent(
+          sensorId,
+          "Sulama Sonrası Düşük Etki ($sensorId)",
+          "Sulama öncesi %${pre.toInt()} → sonrası %${parsed.moisture.toInt()}. Su deposunu veya hortumu kontrol edin.",
+          'alert',
+        );
+      }
+    }
+
+    final point = TelemetryPoint(
+      timestamp: parsed.lastUpdate,
+      moisture: parsed.moisture,
+      temperature: parsed.temperature,
+      light: parsed.light,
+    );
+    _appendAndPersistHistoryPoint(sensorId, point);
+
+    final linkedPlant = _authorizedPlantsBySensor[sensorId];
+    if (linkedPlant != null) {
+      _checkAndTriggerAutoWatering(linkedPlant, parsed);
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> _appendAndPersistHistoryPoint(String sensorId, TelemetryPoint point) async {
+    final list = _telemetryHistory.putIfAbsent(sensorId, () => []);
+    final bool shouldSave = list.isEmpty ||
+        (list.last.moisture - point.moisture).abs() >= 1.0 ||
+        (point.timestamp - list.last.timestamp) >= 5 * 60 * 1000;
+
+    if (!shouldSave) return;
+
+    list.add(point);
+    if (list.length > 30) list.removeAt(0);
+
+    final uid = _auth.currentUser?.uid;
+    if (uid != null) {
+      try {
+        await _db
+            .child('users')
+            .child(uid)
+            .child('sensorHistory')
+            .child(sensorId)
+            .child(point.timestamp.toString())
+            .set(point.toMap());
+      } catch (_) {}
+    }
+  }
+
+  // 5.2 & 5.3: Olayları wateringEvents ve alerts düğümlerine ayrı ayrı yazar ve bildirim açıksa uyarı yayınlar
+  Future<void> _recordSeparatedEvent(
+    String sensorId,
+    String title,
+    String subtitle,
+    String type,
+  ) async {
+    final event = TimelineEvent(
+      sensorId: sensorId,
+      title: title,
+      subtitle: subtitle,
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+      type: type,
+    );
+
+    if (type == 'watering') {
+      final list = _wateringEvents.putIfAbsent(sensorId, () => []);
+      list.insert(0, event);
+    } else if (type == 'alert') {
+      final list = _alertEvents.putIfAbsent(sensorId, () => []);
+      list.insert(0, event);
+      if (_notificationsEnabled) {
+        _alertStreamController.add(event);
+      }
+    }
+    notifyListeners();
+
+    final uid = _auth.currentUser?.uid;
+    if (uid != null) {
+      final String nodeName = type == 'watering' ? 'wateringEvents' : 'alerts';
+      try {
+        await _db
+            .child('users')
+            .child(uid)
+            .child(nodeName)
+            .child(sensorId)
+            .push()
+            .set(event.toMap());
+      } catch (_) {}
+    }
+  }
+
+  Future<void> setNotificationsEnabled(bool enabled) async {
+    _notificationsEnabled = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('notifications_enabled', enabled);
+  }
+
+  Future<void> triggerTestNotification() async {
+    final event = TimelineEvent(
+      sensorId: 'sistem',
+      title: 'SoilSense Bildirim Testi Başarılı',
+      subtitle: 'Kritik nem, çevrimdışı sensör ve pompa zaman aşımı uyarıları aktif.',
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+      type: 'alert',
+    );
+    _alertStreamController.add(event);
+  }
+
+  Future<void> updateSafetySettings({
+    required int maxPumpSeconds,
+    required int offlineTimeoutMinutes,
+  }) async {
+    _maxPumpSeconds = maxPumpSeconds;
+    _offlineTimeoutMinutes = offlineTimeoutMinutes;
+    notifyListeners();
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('max_pump_seconds', maxPumpSeconds);
+    await prefs.setInt('offline_timeout_minutes', offlineTimeoutMinutes);
+
+    for (final sId in _authorizedPlantsBySensor.keys) {
+      try {
+        await _db.child('sensorConfigs').child(sId).update({
+          'maxPumpSeconds': maxPumpSeconds,
+        });
+      } catch (_) {}
+    }
+  }
+
+  Future<void> reloadSafetySettings() async {
     final prefs = await SharedPreferences.getInstance();
     _isHardwareMode = prefs.getBool(_hardwareModePrefKey) ?? false;
+    _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
+    _maxPumpSeconds = prefs.getInt('max_pump_seconds') ?? 15;
+    _offlineTimeoutMinutes = prefs.getInt('offline_timeout_minutes') ?? 30;
     notifyListeners();
   }
 
@@ -91,87 +492,14 @@ class SensorProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_hardwareModePrefKey, enabled);
-  }
 
-  void _listenToSensors() {
-    _sensorsSubscription = _db.child('sensors').onValue.listen((event) {
-      final data = event.snapshot.value;
-
-      if (data != null && data is Map) {
-        data.forEach((key, value) {
-          if (value is Map) {
-            final sensorId = key.toString();
-            final Map<dynamic, dynamic> currentMap =
-                (value['current'] is Map) ? value['current'] as Map : value;
-            final parsed = SensorData.fromMap(sensorId, currentMap);
-            _hardwareSensors[sensorId] = parsed;
-
-            if (value['history'] is Map) {
-              final historyMap = value['history'] as Map;
-              final sortedKeys = historyMap.keys.map((k) => k.toString()).toList()..sort();
-              final List<double> points = [];
-              for (final tsKey in sortedKeys) {
-                final entry = historyMap[tsKey];
-                if (entry is Map && entry['moisture'] != null) {
-                  points.add(SensorData.parseSafeDouble(entry['moisture'], fallback: parsed.moisture));
-                }
-              }
-              if (points.isNotEmpty) {
-                _moistureHistory[sensorId] =
-                    points.length > 7 ? points.sublist(points.length - 7) : points;
-              }
-            } else {
-              final list = _moistureHistory.putIfAbsent(sensorId, () => []);
-              if (list.isEmpty || (list.last - parsed.moisture).abs() >= 0.5) {
-                list.add(parsed.moisture);
-                if (list.length > 7) list.removeAt(0);
-              }
-            }
-          }
+    for (final sId in _authorizedPlantsBySensor.keys) {
+      try {
+        await _db.child('sensorConfigs').child(sId).update({
+          'hardwareMode': enabled,
         });
-      }
-      notifyListeners();
-    }, onError: (error) {
-      debugPrint("Sensör dinleme uyarısı: $error");
-    });
-  }
-
-  void _listenToPumpCommands() {
-    _pumpSubscription = _db.child('pumpCommands').onValue.listen((event) {
-      final data = event.snapshot.value;
-      if (data != null && data is Map) {
-        data.forEach((key, value) {
-          if (value is Map) {
-            final sId = key.toString();
-            final state = PumpCommandState.fromMap(value);
-            _pumpStates[sId] = state;
-
-            // ESP32 pompayı açtığını onayladıysa Watchdog zamanlayıcısını iptal et
-            if (state.actualState == state.requestedState) {
-              _pumpWatchdogTimers[sId]?.cancel();
-            }
-          }
-        });
-        notifyListeners();
-      }
-    }, onError: (error) {
-      debugPrint("Pompa durumu dinleme uyarısı: $error");
-    });
-  }
-
-  void _listenToSensorConfigs() {
-    _configSubscription = _db.child('sensorConfigs').onValue.listen((event) {
-      final data = event.snapshot.value;
-      if (data != null && data is Map) {
-        data.forEach((key, value) {
-          if (value is Map) {
-            final sId = key.toString();
-            _sensorConfigs[sId] = SensorConfig.fromMap(sId, value);
-          }
-        });
-        notifyListeners();
-      }
-    }, onError: (_) {});
+      } catch (_) {}
+    }
   }
 
   SensorData? getSensor(String sensorId) {
@@ -179,129 +507,136 @@ class SensorProvider extends ChangeNotifier {
     if (_isHardwareMode) {
       return _hardwareSensors[sensorId];
     }
-    return _hardwareSensors[sensorId] ?? _simulatedSensors[sensorId];
+    return _simulatedSensors[sensorId] ?? _hardwareSensors[sensorId];
+  }
+
+  bool isSensorOnline(String sensorId) {
+    final s = getSensor(sensorId);
+    return s != null && s.isOnlineWithThreshold(_offlineTimeoutMinutes);
   }
 
   SensorConfig getSensorConfig(String sensorId) {
-    return _sensorConfigs[sensorId] ?? SensorConfig(sensorId: sensorId);
+    return _sensorConfigs[sensorId] ??
+        SensorConfig(sensorId: sensorId, maxPumpSeconds: _maxPumpSeconds);
+  }
+
+  WateringEffectivenessReport? getWateringReport(String sensorId) {
+    return _wateringReports[sensorId];
   }
 
   Future<void> saveSensorConfig(SensorConfig config) async {
     _sensorConfigs[config.sensorId] = config;
     notifyListeners();
     try {
-      await _db.child('sensorConfigs').child(config.sensorId).set(config.toMap());
-    } catch (e) {
-      debugPrint("Kalibrasyon kaydı uyarısı: $e");
-    }
+      await _db.child('sensorConfigs').child(config.sensorId).update(config.toMap());
+    } catch (_) {}
   }
 
   PumpCommandState getPumpState(String sensorId, {bool fallbackPumpOn = false}) {
     return _pumpStates[sensorId] ??
-        PumpCommandState(requestedState: fallbackPumpOn, actualState: false);
+        PumpCommandState(
+          requestedState: fallbackPumpOn,
+          actualState: false,
+          maxDurationSeconds: _maxPumpSeconds,
+        );
+  }
+
+  List<TelemetryPoint> getTelemetryHistory(String sensorId) {
+    return List<TelemetryPoint>.from(_telemetryHistory[sensorId] ?? const []);
   }
 
   List<double> getMoistureHistory(String sensorId, double currentMoisture) {
-    final list = _moistureHistory[sensorId];
-    if (list != null && list.length >= 2) return List<double>.from(list);
-    return [currentMoisture, currentMoisture];
-  }
-
-  // Kuruma hızı analizi: Kritik nem eşiğine tahmini kaç saat kaldığını hesaplar
-  String estimateTimeUntilCritical(String sensorId, double currentMoisture, int minMoisture) {
-    if (currentMoisture <= minMoisture) {
-      return "Kritik eşiğin altında (Hemen sulanmalı)";
+    final points = _telemetryHistory[sensorId];
+    if (points != null && points.isNotEmpty) {
+      return points.map((p) => p.moisture).toList();
     }
-    final history = _moistureHistory[sensorId];
-    if (history == null || history.length < 2) {
-      return "Tahmin için sensör geçmişi toplanıyor";
-    }
-
-    // Son ölçümler arasındaki ortalama düşüş hızı
-    final double first = history.first;
-    final double last = history.last;
-    final double drop = first - last;
-
-    if (drop <= 0.5) {
-      return "Nem dengeli (Hızlı kayıp yok)";
-    }
-
-    final double hourlyDropRate = (drop / history.length).clamp(0.3, 8.0);
-    final int hoursRemaining = ((currentMoisture - minMoisture) / hourlyDropRate).round();
-    return "Kuruma hızı: ~%${hourlyDropRate.toStringAsFixed(1)}/ölçüm • Tahmini $hoursRemaining saat sonra sulama";
+    return [currentMoisture];
   }
 
   List<TimelineEvent> getTimeline(String sensorId, double currentMoisture) {
-    final existing = _timelines[sensorId];
-    if (existing != null && existing.isNotEmpty) return existing;
-    final sensor = getSensor(sensorId);
-    if (sensor == null) return [];
-    return [
-      TimelineEvent(
-        sensorId: sensorId,
-        title: "Son Telemetri Paketi",
-        subtitle: "Nem: %${sensor.moisture.toInt()} • Sıcaklık: ${sensor.temperature.toStringAsFixed(1)}°C",
-        timestamp: sensor.lastUpdate,
-        type: 'sensor',
-      ),
+    final List<TimelineEvent> combined = [
+      ...(_wateringEvents[sensorId] ?? const []),
+      ...(_alertEvents[sensorId] ?? const []),
     ];
+    combined.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    return combined;
   }
 
   List<TimelineEvent> getAllGardenTimeline() {
     final List<TimelineEvent> all = [];
-    _timelines.forEach((_, list) => all.addAll(list));
-    if (all.isEmpty) {
-      sensors.forEach((id, s) {
-        all.add(
-          TimelineEvent(
-            sensorId: id,
-            title: "Sensör ($id) Durumu",
-            subtitle: "Nem: %${s.moisture.toInt()} • Sıcaklık: ${s.temperature.toStringAsFixed(1)}°C",
-            timestamp: s.lastUpdate,
-            type: 'sensor',
-          ),
-        );
-      });
-    }
+    _wateringEvents.forEach((_, list) => all.addAll(list));
+    _alertEvents.forEach((_, list) => all.addAll(list));
     all.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     return all;
   }
 
-  void _addLocalTimelineEvent(String sensorId, String title, String subtitle, String type) {
-    final list = _timelines.putIfAbsent(sensorId, () => []);
-    list.insert(
-      0,
-      TimelineEvent(
-        sensorId: sensorId,
-        title: title,
-        subtitle: subtitle,
-        timestamp: DateTime.now().millisecondsSinceEpoch,
-        type: type,
-      ),
-    );
-    notifyListeners();
+  Future<void> _checkAndTriggerAutoWatering(Plant plant, SensorData sensor) async {
+    final sId = plant.sensorId;
+    final pumpState = getPumpState(sId);
+
+    if (!pumpState.autoWatering) return;
+    if (pumpState.requestedState || pumpState.actualState) return;
+    if (!sensor.isOnlineWithThreshold(_offlineTimeoutMinutes)) return;
+
+    if (sensor.moisture < plant.minMoisture) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final lastRun = _lastAutoWateringTimestamp[sId] ?? 0;
+      if (now - lastRun < 30 * 60 * 1000) return;
+
+      final dailyCount = _dailyAutoWateringCount[sId] ?? 0;
+      if (dailyCount >= 3) {
+        await _recordSeparatedEvent(
+          sId,
+          "Günlük Otomatik Sulama Limiti Doldu (${plant.name})",
+          "Güvenlik amacıyla günde en fazla 3 kez otomatik sulama yapılır.",
+          'alert',
+        );
+        return;
+      }
+
+      _lastAutoWateringTimestamp[sId] = now;
+      _dailyAutoWateringCount[sId] = dailyCount + 1;
+
+      await _recordSeparatedEvent(
+        sId,
+        "Otomatik Sulama Başlatıldı (${plant.name})",
+        "Nem %${sensor.moisture.toInt()} < Eşik %${plant.minMoisture}. Pompa $_maxPumpSeconds sn süreyle tetiklendi.",
+        'watering',
+      );
+
+      await requestPumpState(
+        sensorId: sId,
+        requestedState: true,
+        maxDurationSeconds: _maxPumpSeconds,
+        autoWatering: true,
+      );
+    }
   }
 
-  // Pompa Komutu + 20 Saniyelik Donanım Watchdog Koruması
   Future<void> requestPumpState({
     required String sensorId,
     required bool requestedState,
-    int maxDurationSeconds = 15,
+    int? maxDurationSeconds,
     bool? autoWatering,
   }) async {
     if (sensorId.isEmpty) return;
 
-    final prev = _pumpStates[sensorId] ?? const PumpCommandState();
+    final effectiveDuration = maxDurationSeconds ?? _maxPumpSeconds;
+    final prev = _pumpStates[sensorId] ?? PumpCommandState(maxDurationSeconds: effectiveDuration);
     final sensor = getSensor(sensorId);
 
-    if (autoWatering == true && (sensor == null || !sensor.isOnline)) {
-      _addLocalTimelineEvent(
+    if (autoWatering == true && (sensor == null || !sensor.isOnlineWithThreshold(_offlineTimeoutMinutes))) {
+      await _recordSeparatedEvent(
         sensorId,
-        "Otomatik Sulama Engellendi ($sensorId)",
-        "Sensör verisi güncel olmadığı için güvenlik kilidi devreye girdi.",
+        "Otomatik Sulama Güvenlik Kilidi ($sensorId)",
+        "Sensör verisi güncel olmadığı için otomatik sulama reddedildi.",
         'alert',
       );
       return;
+    }
+
+    if (requestedState && sensor != null) {
+      _preWateringMoisture[sensorId] = sensor.moisture;
     }
 
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -311,29 +646,27 @@ class SensorProvider extends ChangeNotifier {
       requestedState: requestedState,
       actualState: nextActualState,
       autoWatering: autoWatering ?? prev.autoWatering,
-      maxDurationSeconds: maxDurationSeconds,
+      maxDurationSeconds: effectiveDuration,
       updatedAt: now,
       timedOut: false,
     );
 
     _pumpStates[sensorId] = updated;
 
-    // Donanım modunda pompa açma komutu verildiyse 20 sn Watchdog başlat
     _pumpWatchdogTimers[sensorId]?.cancel();
     if (_isHardwareMode && requestedState) {
       _pumpWatchdogTimers[sensorId] = Timer(const Duration(seconds: 20), () async {
         final currentState = _pumpStates[sensorId];
         if (currentState != null && currentState.requestedState && !currentState.actualState) {
-          // ESP32 20 saniye içinde yanıt vermedi; komutu güvenlik için geri çek!
           _pumpStates[sensorId] = PumpCommandState(
             requestedState: false,
             actualState: false,
             autoWatering: currentState.autoWatering,
-            maxDurationSeconds: maxDurationSeconds,
+            maxDurationSeconds: effectiveDuration,
             updatedAt: DateTime.now().millisecondsSinceEpoch,
             timedOut: true,
           );
-          _addLocalTimelineEvent(
+          await _recordSeparatedEvent(
             sensorId,
             "Pompa Komutu Zaman Aşımı ($sensorId)",
             "ESP32 20 sn içinde onay vermediği için komut güvenlik amacıyla iptal edildi.",
@@ -351,21 +684,28 @@ class SensorProvider extends ChangeNotifier {
 
     if (!_isHardwareMode && requestedState) {
       final current = getSensor(sensorId);
-      final nextMoisture = ((current?.moisture ?? 30.0) + 20.0).clamp(0.0, 95.0);
+      final pre = current?.moisture ?? 30.0;
+      final nextMoisture = (pre + 22.0).clamp(0.0, 95.0);
       await simulateSensorReading(
         sensorId: sensorId,
         moisture: nextMoisture,
         temperature: current?.temperature ?? 24.0,
         light: current?.light ?? 65.0,
       );
+      _wateringReports[sensorId] = WateringEffectivenessReport(
+        sensorId: sensorId,
+        preMoisture: pre,
+        postMoisture: nextMoisture,
+        timestamp: now,
+      );
     }
 
-    _addLocalTimelineEvent(
+    await _recordSeparatedEvent(
       sensorId,
-      requestedState ? "Pompa Açma İsteği ($sensorId)" : "Pompa Durdurma İsteği ($sensorId)",
+      requestedState ? "Pompa Komutu: AÇIK ($sensorId)" : "Pompa Komutu: KAPALI ($sensorId)",
       _isHardwareMode
-          ? "ESP32 onayı bekleniyor (20sn Watchdog koruması aktif)."
-          : "Simülasyon modunda pompa çalıştırıldı.",
+          ? "ESP32 onayı bekleniyor (Maks. süre: ${effectiveDuration}sn)."
+          : "Simülasyon modunda pompa çalıştırıldı (${effectiveDuration}sn).",
       'watering',
     );
 
@@ -373,13 +713,11 @@ class SensorProvider extends ChangeNotifier {
       await _db.child('pumpCommands').child(sensorId).update({
         'requestedState': requestedState,
         'autoWatering': updated.autoWatering,
-        'maxDurationSeconds': maxDurationSeconds,
+        'maxDurationSeconds': effectiveDuration,
         'updatedAt': now,
         'timedOut': false,
       });
-    } catch (e) {
-      debugPrint("Firebase pumpCommands yazma uyarısı: $e");
-    }
+    } catch (_) {}
   }
 
   Future<void> simulateSensorReading({
@@ -397,19 +735,32 @@ class SensorProvider extends ChangeNotifier {
       temperature: temperature,
       light: light,
       lastUpdate: now,
+      isSimulated: true,
     );
 
     _simulatedSensors[sensorId] = simulated;
-    final history = _moistureHistory.putIfAbsent(sensorId, () => []);
-    history.add(moisture);
-    if (history.length > 7) history.removeAt(0);
-
-    _addLocalTimelineEvent(
+    await _appendAndPersistHistoryPoint(
       sensorId,
-      "Simülasyon Ölçümü ($sensorId)",
-      "Nem: %${moisture.toInt()} • Sıcaklık: ${temperature.toStringAsFixed(1)}°C • Işık: %${light.toInt()}",
-      'sensor',
+      TelemetryPoint(
+        timestamp: now,
+        moisture: moisture,
+        temperature: temperature,
+        light: light,
+      ),
     );
+
+    final linkedPlant = _authorizedPlantsBySensor[sensorId];
+    if (linkedPlant != null) {
+      if (moisture < linkedPlant.minMoisture) {
+        await _recordSeparatedEvent(
+          sensorId,
+          "Kritik Nem Uyarısı (${linkedPlant.name})",
+          "Toprak nemi %${moisture.toInt()} seviyesine düştü (Eşik: %${linkedPlant.minMoisture}).",
+          'alert',
+        );
+      }
+      await _checkAndTriggerAutoWatering(linkedPlant, simulated);
+    }
   }
 
   Future<void> ensureSensorExists(String sensorId, {double initialMoisture = 50.0}) async {
@@ -430,9 +781,9 @@ class SensorProvider extends ChangeNotifier {
     for (final timer in _pumpWatchdogTimers.values) {
       timer.cancel();
     }
-    _sensorsSubscription?.cancel();
-    _pumpSubscription?.cancel();
-    _configSubscription?.cancel();
+    _clearAllSubscriptions();
+    _authSubscription?.cancel();
+    _alertStreamController.close();
     super.dispose();
   }
 }

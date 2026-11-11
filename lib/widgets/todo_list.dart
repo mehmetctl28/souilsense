@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/todo_provider.dart';
+import '../models/todo.dart';
 import '../constants/colors.dart';
 
 class TodoList extends StatefulWidget {
@@ -16,8 +17,8 @@ class _TodoListState extends State<TodoList> {
 
   String _selectedCategory = 'Sulama';
   String _selectedPriority = 'Normal';
-  String _selectedDueDate = 'Bugün';
-  bool _showCompletedHistory = false;
+  DateTime _selectedDate = DateTime.now();
+  int _selectedTabIndex = 0; // 0: Aktif, 1: Otomatik Geçmiş, 2: Manuel Geçmiş
 
   @override
   void dispose() {
@@ -26,15 +27,30 @@ class _TodoListState extends State<TodoList> {
     super.dispose();
   }
 
+  Future<void> _pickDueDate() async {
+    _focusNode.unfocus();
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (picked != null && mounted) {
+      setState(() => _selectedDate = picked);
+    }
+  }
+
   void _addNewTask(TodoProvider provider) {
     if (_controller.text.trim().isNotEmpty) {
       provider.addTodo(
         _controller.text.trim(),
         category: _selectedCategory,
         priority: _selectedPriority,
-        dueDate: _selectedDueDate,
+        dueDate: _selectedDate,
       );
       _controller.clear();
+      setState(() => _selectedDate = DateTime.now());
     }
     _focusNode.unfocus();
   }
@@ -50,18 +66,32 @@ class _TodoListState extends State<TodoList> {
     }
   }
 
+  String _formatShortDate(DateTime dt) {
+    final d = dt.day.toString().padLeft(2, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    return "$d.$m.${dt.year}";
+  }
+
   @override
   Widget build(BuildContext context) {
     final todoProvider = Provider.of<TodoProvider>(context);
     final allTodos = todoProvider.todos;
+    final activeList = todoProvider.activeTodos;
+    final autoHistoryList = todoProvider.completedAutoTodos;
+    final manualHistoryList = todoProvider.completedManualTodos;
 
-    final completedCount = allTodos.where((t) => t.isCompleted).length;
+    final completedCount = autoHistoryList.length + manualHistoryList.length;
     final double progress = allTodos.isEmpty ? 0.0 : completedCount / allTodos.length;
     final int progressPercent = (progress * 100).toInt();
 
-    final displayedTodos = allTodos.where((t) {
-      return _showCompletedHistory ? t.isCompleted : !t.isCompleted;
-    }).toList();
+    List<Todo> displayedTodos;
+    if (_selectedTabIndex == 0) {
+      displayedTodos = activeList;
+    } else if (_selectedTabIndex == 1) {
+      displayedTodos = autoHistoryList;
+    } else {
+      displayedTodos = manualHistoryList;
+    }
 
     final cardColor = Theme.of(context).cardColor;
     final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
@@ -73,7 +103,7 @@ class _TodoListState extends State<TodoList> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              "Bugünün Planı",
+              "Bakım Planı ve Görevler",
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor),
             ),
             Text(
@@ -82,19 +112,7 @@ class _TodoListState extends State<TodoList> {
             ),
           ],
         ),
-        const SizedBox(height: 14),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text("Tamamlanan ($completedCount/${allTodos.length})",
-                style: TextStyle(fontSize: 13, color: textColor.withOpacity(0.7))),
-            Text(
-              "%$progressPercent",
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textColor),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: LinearProgressIndicator(
@@ -104,9 +122,9 @@ class _TodoListState extends State<TodoList> {
             color: AppColors.primary,
           ),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 16),
 
-        // YENİ GÖREV EKLEME KARTI
+        // YENİ GÖREV EKLEME KARTI + GERÇEK TAKVİM SEÇİCİ
         Container(
           padding: const EdgeInsets.fromLTRB(16, 6, 12, 12),
           decoration: BoxDecoration(
@@ -128,7 +146,7 @@ class _TodoListState extends State<TodoList> {
                       style: TextStyle(color: textColor),
                       onSubmitted: (_) => _addNewTask(todoProvider),
                       decoration: const InputDecoration(
-                        hintText: "Yeni görev ekle...",
+                        hintText: "Yeni bakım görevi ekle...",
                         hintStyle: TextStyle(color: Colors.grey),
                         border: InputBorder.none,
                       ),
@@ -146,8 +164,7 @@ class _TodoListState extends State<TodoList> {
                   children: [
                     _buildMiniDropdown(
                       value: _selectedCategory,
-                      items: const ['Sulama', 'Gübreleme', 'Budama', 'Genel'],
-                      icon: Icons.category_outlined,
+                      items: const ['Sulama', 'Gübreleme', 'Budama', 'Saksı Değişimi', 'Genel'],
                       textColor: textColor,
                       onChanged: (v) => setState(() => _selectedCategory = v!),
                     ),
@@ -155,17 +172,34 @@ class _TodoListState extends State<TodoList> {
                     _buildMiniDropdown(
                       value: _selectedPriority,
                       items: const ['Düşük', 'Normal', 'Yüksek'],
-                      icon: Icons.flag_outlined,
                       textColor: textColor,
                       onChanged: (v) => setState(() => _selectedPriority = v!),
                     ),
                     const SizedBox(width: 8),
-                    _buildMiniDropdown(
-                      value: _selectedDueDate,
-                      items: const ['Bugün', 'Yarın', 'Bu Hafta'],
-                      icon: Icons.event_outlined,
-                      textColor: textColor,
-                      onChanged: (v) => setState(() => _selectedDueDate = v!),
+                    InkWell(
+                      onTap: _pickDueDate,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.calendar_today, size: 14, color: AppColors.primary),
+                            const SizedBox(width: 6),
+                            Text(
+                              _formatShortDate(_selectedDate),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -176,25 +210,36 @@ class _TodoListState extends State<TodoList> {
 
         const SizedBox(height: 14),
 
-        // AKTİF GÖREVLER / TAMAMLANAN GEÇMİŞ SEKMESİ
-        Row(
-          children: [
-            _buildTabChip(
-              label: "Aktif Görevler (${allTodos.length - completedCount})",
-              selected: !_showCompletedHistory,
-              onTap: () => setState(() => _showCompletedHistory = false),
-              cardColor: cardColor,
-              textColor: textColor,
-            ),
-            const SizedBox(width: 8),
-            _buildTabChip(
-              label: "Görev Geçmişi ($completedCount)",
-              selected: _showCompletedHistory,
-              onTap: () => setState(() => _showCompletedHistory = true),
-              cardColor: cardColor,
-              textColor: textColor,
-            ),
-          ],
+        // 5.1: AKTİF GÖREVLER / OTOMATİK GEÇMİŞ / MANUEL GEÇMİŞ AYRIMI
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _buildTabChip(
+                label: "Aktif (${activeList.length})",
+                selected: _selectedTabIndex == 0,
+                onTap: () => setState(() => _selectedTabIndex = 0),
+                cardColor: cardColor,
+                textColor: textColor,
+              ),
+              const SizedBox(width: 8),
+              _buildTabChip(
+                label: "Otomatik Geçmiş (${autoHistoryList.length})",
+                selected: _selectedTabIndex == 1,
+                onTap: () => setState(() => _selectedTabIndex = 1),
+                cardColor: cardColor,
+                textColor: textColor,
+              ),
+              const SizedBox(width: 8),
+              _buildTabChip(
+                label: "Manuel Geçmiş (${manualHistoryList.length})",
+                selected: _selectedTabIndex == 2,
+                onTap: () => setState(() => _selectedTabIndex = 2),
+                cardColor: cardColor,
+                textColor: textColor,
+              ),
+            ],
+          ),
         ),
 
         const SizedBox(height: 12),
@@ -204,19 +249,17 @@ class _TodoListState extends State<TodoList> {
             padding: const EdgeInsets.symmetric(vertical: 16),
             child: Center(
               child: Text(
-                _showCompletedHistory
-                    ? "Henüz tamamlanmış görev geçmişi yok."
-                    : "Harika! Bekleyen aktif bakım görevin yok.",
+                _selectedTabIndex == 0
+                    ? "Bekleyen aktif bakım görevin yok."
+                    : (_selectedTabIndex == 1
+                        ? "Henüz tamamlanmış otomatik sensör görevi yok."
+                        : "Henüz tamamlanmış manuel görev yok."),
                 style: const TextStyle(color: Colors.grey, fontSize: 13),
               ),
             ),
           )
         else
           ...displayedTodos.map((todo) {
-            final displayTitle = todo.isAuto && !todo.title.startsWith('🚨')
-                ? '🚨 ${todo.title}'
-                : todo.title;
-
             return Container(
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -238,14 +281,27 @@ class _TodoListState extends State<TodoList> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          displayTitle,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: todo.isCompleted ? Colors.grey : textColor,
-                            decoration: todo.isCompleted ? TextDecoration.lineThrough : TextDecoration.none,
-                          ),
+                        Row(
+                          children: [
+                            if (todo.isAuto)
+                              const Padding(
+                                padding: EdgeInsets.only(right: 6),
+                                child: Icon(Icons.sensors, size: 16, color: AppColors.statusCritical),
+                              ),
+                            Expanded(
+                              child: Text(
+                                todo.title,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: todo.isCompleted ? Colors.grey : textColor,
+                                  decoration: todo.isCompleted
+                                      ? TextDecoration.lineThrough
+                                      : TextDecoration.none,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                         if (todo.description.isNotEmpty) ...[
                           const SizedBox(height: 4),
@@ -259,13 +315,28 @@ class _TodoListState extends State<TodoList> {
                           spacing: 6,
                           runSpacing: 4,
                           children: [
-                            _buildBadge(todo.category, AppColors.primary.withOpacity(0.12), AppColors.primary),
+                            _buildBadge(
+                              todo.isAuto ? "Otomatik" : "Manuel",
+                              todo.isAuto
+                                  ? Colors.deepOrange.withOpacity(0.12)
+                                  : Colors.blue.withOpacity(0.12),
+                              todo.isAuto ? Colors.deepOrange : Colors.blue,
+                            ),
+                            _buildBadge(
+                              todo.category,
+                              AppColors.primary.withOpacity(0.12),
+                              AppColors.primary,
+                            ),
                             _buildBadge(
                               todo.priority,
                               _priorityColor(todo.priority).withOpacity(0.12),
                               _priorityColor(todo.priority),
                             ),
-                            _buildBadge(todo.dueDate, Colors.grey.withOpacity(0.12), Colors.grey),
+                            _buildBadge(
+                              todo.formattedDueDate,
+                              Colors.grey.withOpacity(0.12),
+                              Colors.grey,
+                            ),
                           ],
                         ),
                       ],
@@ -286,7 +357,6 @@ class _TodoListState extends State<TodoList> {
   Widget _buildMiniDropdown({
     required String value,
     required List<String> items,
-    required IconData icon,
     required Color textColor,
     required ValueChanged<String?> onChanged,
   }) {

@@ -492,13 +492,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final int healthyPlantCount = plants.length - attentionPlants.length;
 
-    final int onlineSensorCount = plants.where((p) {
-      final s = sensorProvider.getSensor(p.sensorId);
-      return s != null && s.isOnline;
-    }).length;
+    final int onlineSensorCount = plants
+        .where((p) => sensorProvider.isSensorOnline(p.sensorId))
+        .length;
 
-    final int gardenHealthScore =
-        PlantIntelligence.calculateGardenAverageScore(plants, sensorProvider.sensors);
+    final int gardenHealthScore = PlantIntelligence.calculateGardenAverageScore(
+      plants,
+      sensorProvider.sensors,
+      offlineTimeoutMinutes: sensorProvider.offlineTimeoutMinutes,
+    );
 
     double avgMoisture = 0;
     double avgTemp = 0;
@@ -838,6 +840,45 @@ class _HomeScreenState extends State<HomeScreen> {
 
                 // 5. BUGÜNÜN PLANI
                 const TodoList(),
+                const SizedBox(height: 14),
+                // Kritik 4: Donanım / Simülasyon Modu ve Son Gerçek Veri Durum Bandı
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: sensorProvider.isHardwareMode
+                        ? AppColors.statusGood.withOpacity(0.12)
+                        : Colors.blue.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: sensorProvider.isHardwareMode
+                          ? AppColors.statusGood.withOpacity(0.4)
+                          : Colors.blue.withOpacity(0.4),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        sensorProvider.isHardwareMode ? Icons.memory : Icons.science_outlined,
+                        size: 18,
+                        color: sensorProvider.isHardwareMode ? AppColors.statusGood : Colors.blue,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          sensorProvider.isHardwareMode
+                              ? "Gerçek Donanım Modu Aktif • Bağlı ESP32: ${sensorProvider.connectedHardwareSensorCount}/${plants.length} • Son Veri: ${_formatLastUpdate(sensorProvider.lastHardwareUpdateTimestamp)}"
+                              : "Simülasyon Modu Aktif (Ölçümler sanal test verisidir, gerçek sensör verisi değildir)",
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: textColor,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
