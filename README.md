@@ -1,10 +1,10 @@
-# 🌱 SoilSense — Akıllı Bitki Telemetri ve Otonom Sulama Sistemi
+#  SoilSense — Akıllı Bitki Telemetri ve Otonom Sulama Sistemi
 
 SoilSense; **ESP32** mikrodenetleyicilerinden gelen toprak nemi, ortam sıcaklığı, ışık şiddeti ve ham ADC verilerini **Firebase Realtime Database** üzerinden gerçek zamanlı işleyen, bitki türüne özel bilimsel eşik değerlerine göre otonom sulama kararları veren **Flutter** tabanlı bir IoT uygulamasıdır.
 
 ---
 
-## 🚀 Temel Sistem Özellikleri
+##  Temel Sistem Özellikleri
 
 * **Çift Modlu Mimari (Dual-Mode IoT Engine):**
   * **Simülasyon Modu (`isHardwareMode = false`):** Fiziksel ESP32 bağlı değilken uygulama içi telemetri simülatörüyle tüm eşik, görev ve grafik algoritmalarını test eder. Gerçek Firebase `/sensors` düğümlerini **ezmez**.
@@ -20,7 +20,7 @@ SoilSense; **ESP32** mikrodenetleyicilerinden gelen toprak nemi, ortam sıcaklı
 
 ---
 
-## 📂 Proje Klasör ve Mimari Yapısı
+##  Proje Klasör ve Mimari Yapısı
 
 Uygulama **Provider** durum yönetimi (`MultiProvider` + `ChangeNotifierProxyProvider`) ile katmanlı olarak tasarlanmıştır:
 
@@ -58,7 +58,7 @@ lib/
 
 ---
 
-## 🔥 Firebase Realtime Database Şeması (Veri Sözleşmesi)
+##  Firebase Realtime Database Şeması (Veri Sözleşmesi)
 
 Kullanıcı verileri `users/{uid}` altında izole edilir. Uygulama tüm `/sensors` ağını dinlemez; yalnızca kullanıcının bitkilerine eşleştirdiği sensör düğümlerine bireysel abonelik açar:
 
@@ -152,7 +152,7 @@ Kullanıcı verileri `users/{uid}` altında izole edilir. Uygulama tüm `/sensor
 
 ---
 
-## 🔌 ESP32 Donanım Entegrasyon Kuralları
+##  ESP32 Donanım Entegrasyon Kuralları
 
 ESP32 tarafında kod geliştirirken mobil uygulamayla tam uyum için aşağıdaki 3 kurala uyulmalıdır:
 
@@ -168,7 +168,7 @@ ESP32 tarafında kod geliştirirken mobil uygulamayla tam uyum için aşağıdak
 
 ---
 
-## 🛠️ Kurulum ve Çalıştırma
+##  Kurulum ve Çalıştırma
 
 1. **Bağımlılıkları yükleyin:**
    ```bash
@@ -188,7 +188,7 @@ ESP32 tarafında kod geliştirirken mobil uygulamayla tam uyum için aşağıdak
 
 ---
 
-## 🤝 Ekip İçi Git Çalışma Kuralları (Branching)
+## Ekip İçi Git Çalışma Kuralları (Branching)
 
 Çakışmaları (Merge Conflict) önlemek için doğrudan `main` dalına (branch) `push` yapılmaz:
 
