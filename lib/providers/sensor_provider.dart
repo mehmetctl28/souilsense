@@ -90,6 +90,7 @@ class SensorProvider extends ChangeNotifier {
   final Map<String, SensorData> _simulatedSensors = {};
   final Map<String, PumpCommandState> _pumpStates = {};
   final Map<String, SensorConfig> _sensorConfigs = {};
+  final Map<String, String> _sensorAccessErrors = {};
 
   final Map<String, List<TelemetryPoint>> _hardwareHistory = {};
   final Map<String, List<TimelineEvent>> _wateringEvents = {};
@@ -125,6 +126,7 @@ class SensorProvider extends ChangeNotifier {
   bool get notificationsEnabled => _notificationsEnabled;
   int get maxPumpSeconds => _maxPumpSeconds;
   int get offlineTimeoutMinutes => _offlineTimeoutMinutes;
+  Map<String, String> get sensorAccessErrors => Map.unmodifiable(_sensorAccessErrors);
 
   Map<String, SensorData> get sensors =>
       _isHardwareMode ? _hardwareSensors : {..._hardwareSensors, ..._simulatedSensors};
@@ -185,13 +187,13 @@ class SensorProvider extends ChangeNotifier {
 
     if (savedDate != today) {
       await prefs.setString('auto_watering_limit_date', today);
-      await prefs.remove('auto_watering_counts_json');
+      await prefs.remove('auto_watering_counts_list');
       _dailyAutoWateringCount.clear();
       return;
     }
 
-    final rawMap = prefs.getStringList('auto_watering_counts_list') ?? const [];
-    for (final item in rawMap) {
+    final rawList = prefs.getStringList('auto_watering_counts_list') ?? const [];
+    for (final item in rawList) {
       final parts = item.split(':');
       if (parts.length == 2) {
         final count = int.tryParse(parts[1]) ?? 0;
@@ -253,6 +255,7 @@ class SensorProvider extends ChangeNotifier {
     _simulatedSensors.clear();
     _pumpStates.clear();
     _sensorConfigs.clear();
+    _sensorAccessErrors.clear();
     _wateringEvents.clear();
     _alertEvents.clear();
     _hardwareHistory.clear();
@@ -362,6 +365,7 @@ class SensorProvider extends ChangeNotifier {
       _pumpSubs.remove(id)?.cancel();
       _configSubs.remove(id)?.cancel();
       _connectingSensorIds.remove(id);
+      _sensorAccessErrors.remove(id);
       _hardwareSensors.remove(id);
       _simulatedSensors.remove(id);
     }
@@ -380,11 +384,23 @@ class SensorProvider extends ChangeNotifier {
       return;
     }
     _connectingSensorIds.add(sensorId);
+    _sensorAccessErrors.remove(sensorId);
 
     try {
       if (_activeUid != uid) return;
 
-      await _db.child('sensorOwners').child(sensorId).set(uid);
+      final ownerSnap = await _db.child('sensorOwners').child(sensorId).get();
+      if (ownerSnap.exists && ownerSnap.value.toString() != uid) {
+        _sensorAccessErrors[sensorId] =
+            "Bu sensör ($sensorId) başka bir hesaba kayıtlı.";
+        notifyListeners();
+        return;
+      }
+
+      if (!ownerSnap.exists) {
+        await _db.child('sensorOwners').child(sensorId).set(uid);
+      }
+
       await _db.child('sensorConfigs').child(sensorId).update({
         'ownerUid': uid,
         'minMoisture': plant.minMoisture,
@@ -423,7 +439,9 @@ class SensorProvider extends ChangeNotifier {
         }
       }, onError: (_) {});
     } catch (e) {
-      debugPrint("Sensör ($sensorId) sahiplik/abonelik hatası: $e");
+      _sensorAccessErrors[sensorId] =
+          "Sensör ($sensorId) sahipliği doğrulanamadı. Eşleştirme kaydını ve kuralları kontrol edin.";
+      notifyListeners();
     } finally {
       _connectingSensorIds.remove(sensorId);
     }
