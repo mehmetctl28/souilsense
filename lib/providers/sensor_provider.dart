@@ -85,10 +85,14 @@ class SensorProvider extends ChangeNotifier {
   final Map<String, PumpCommandState> _pumpStates = {};
   final Map<String, SensorConfig> _sensorConfigs = {};
 
-  // 5.2: 3 ayrı kalıcı geçmiş katmanı (sensorHistory, wateringEvents, alerts)
-  final Map<String, List<TelemetryPoint>> _telemetryHistory = {};
+  // Gerçek Firebase geçmişi (yalnızca donanım / oturum verileri)
+  final Map<String, List<TelemetryPoint>> _hardwareHistory = {};
   final Map<String, List<TimelineEvent>> _wateringEvents = {};
   final Map<String, List<TimelineEvent>> _alertEvents = {};
+
+  // Simülasyon moduna özel tamamen yerel geçmiş (Firebase'e asla yazılmaz)
+  final Map<String, List<TelemetryPoint>> _simulatedHistory = {};
+  final Map<String, List<TimelineEvent>> _localSimulatedEvents = {};
 
   final Map<String, WateringEffectivenessReport> _wateringReports = {};
   final Map<String, double> _preWateringMoisture = {};
@@ -102,7 +106,6 @@ class SensorProvider extends ChangeNotifier {
   final Map<String, int> _lastAutoWateringTimestamp = {};
   final Map<String, int> _dailyAutoWateringCount = {};
 
-  // 5.3: Gerçek bildirim akışı (Notifications açıkken arayüzde anlık uyarı tetikler)
   final StreamController<TimelineEvent> _alertStreamController =
       StreamController<TimelineEvent>.broadcast();
   Stream<TimelineEvent> get alertStream => _alertStreamController.stream;
@@ -177,11 +180,12 @@ class SensorProvider extends ChangeNotifier {
     _pumpStates.clear();
     _wateringEvents.clear();
     _alertEvents.clear();
-    _telemetryHistory.clear();
+    _hardwareHistory.clear();
+    _simulatedHistory.clear();
+    _localSimulatedEvents.clear();
     notifyListeners();
   }
 
-  // 5.2: Firebase'de wateringEvents, alerts ve sensorHistory düğümlerini ayrı ayrı dinler
   void _listenToSeparatedUserHistories(String userId) {
     _wateringHistorySub?.cancel();
     _alertsHistorySub?.cancel();
@@ -244,7 +248,7 @@ class SensorProvider extends ChangeNotifier {
             });
             points.sort((a, b) => a.timestamp.compareTo(b.timestamp));
             if (points.isNotEmpty) {
-              _telemetryHistory[sId] =
+              _hardwareHistory[sId] =
                   points.length > 30 ? points.sublist(points.length - 30) : points;
             }
           }
@@ -346,11 +350,11 @@ class SensorProvider extends ChangeNotifier {
       );
       _wateringReports[sensorId] = report;
 
-      if (!report.isEffective) {
-        _recordSeparatedEvent(
+      if (!report.isEffective && _isHardwareMode) {
+        _recordHardwareEvent(
           sensorId,
           "Sulama Sonrası Düşük Etki ($sensorId)",
-          "Sulama öncesi %${pre.toInt()} → sonrası %${parsed.moisture.toInt()}. Su deposunu veya hortumu kontrol edin.",
+          "Sulama öncesi %${pre.toInt()} -> sonrası %${parsed.moisture.toInt()}. Su deposunu veya hortumu kontrol edin.",
           'alert',
         );
       }
@@ -362,18 +366,18 @@ class SensorProvider extends ChangeNotifier {
       temperature: parsed.temperature,
       light: parsed.light,
     );
-    _appendAndPersistHistoryPoint(sensorId, point);
+    _appendHardwareHistoryPoint(sensorId, point);
 
     final linkedPlant = _authorizedPlantsBySensor[sensorId];
-    if (linkedPlant != null) {
+    if (linkedPlant != null && _isHardwareMode) {
       _checkAndTriggerAutoWatering(linkedPlant, parsed);
     }
 
     notifyListeners();
   }
 
-  Future<void> _appendAndPersistHistoryPoint(String sensorId, TelemetryPoint point) async {
-    final list = _telemetryHistory.putIfAbsent(sensorId, () => []);
+  Future<void> _appendHardwareHistoryPoint(String sensorId, TelemetryPoint point) async {
+    final list = _hardwareHistory.putIfAbsent(sensorId, () => []);
     final bool shouldSave = list.isEmpty ||
         (list.last.moisture - point.moisture).abs() >= 1.0 ||
         (point.timestamp - list.last.timestamp) >= 5 * 60 * 1000;
@@ -397,8 +401,31 @@ class SensorProvider extends ChangeNotifier {
     }
   }
 
-  // 5.2 & 5.3: Olayları wateringEvents ve alerts düğümlerine ayrı ayrı yazar ve bildirim açıksa uyarı yayınlar
-  Future<void> _recordSeparatedEvent(
+  void _appendSimulatedHistoryPoint(String sensorId, TelemetryPoint point) {
+    final list = _simulatedHistory.putIfAbsent(sensorId, () => []);
+    list.add(point);
+    if (list.length > 30) list.removeAt(0);
+  }
+
+  void _recordLocalSimulatedEvent(
+    String sensorId,
+    String title,
+    String subtitle,
+    String type,
+  ) {
+    final event = TimelineEvent(
+      sensorId: sensorId,
+      title: "[Simülasyon] $title",
+      subtitle: subtitle,
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+      type: type,
+    );
+    final list = _localSimulatedEvents.putIfAbsent(sensorId, () => []);
+    list.insert(0, event);
+    notifyListeners();
+  }
+
+  Future<void> _recordHardwareEvent(
     String sensorId,
     String title,
     String subtitle,
@@ -469,6 +496,8 @@ class SensorProvider extends ChangeNotifier {
     await prefs.setInt('max_pump_seconds', maxPumpSeconds);
     await prefs.setInt('offline_timeout_minutes', offlineTimeoutMinutes);
 
+    if (!_isHardwareMode) return;
+
     for (final sId in _authorizedPlantsBySensor.keys) {
       try {
         await _db.child('sensorConfigs').child(sId).update({
@@ -492,6 +521,8 @@ class SensorProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_hardwareModePrefKey, enabled);
+
+    if (!enabled) return;
 
     for (final sId in _authorizedPlantsBySensor.keys) {
       try {
@@ -527,6 +558,7 @@ class SensorProvider extends ChangeNotifier {
   Future<void> saveSensorConfig(SensorConfig config) async {
     _sensorConfigs[config.sensorId] = config;
     notifyListeners();
+    if (!_isHardwareMode) return;
     try {
       await _db.child('sensorConfigs').child(config.sensorId).update(config.toMap());
     } catch (_) {}
@@ -542,28 +574,40 @@ class SensorProvider extends ChangeNotifier {
   }
 
   List<TelemetryPoint> getTelemetryHistory(String sensorId) {
-    return List<TelemetryPoint>.from(_telemetryHistory[sensorId] ?? const []);
+    if (!_isHardwareMode && _simulatedHistory.containsKey(sensorId)) {
+      return List<TelemetryPoint>.from(_simulatedHistory[sensorId]!);
+    }
+    return List<TelemetryPoint>.from(_hardwareHistory[sensorId] ?? const []);
   }
 
   List<double> getMoistureHistory(String sensorId, double currentMoisture) {
-    final points = _telemetryHistory[sensorId];
-    if (points != null && points.isNotEmpty) {
+    final points = getTelemetryHistory(sensorId);
+    if (points.isNotEmpty) {
       return points.map((p) => p.moisture).toList();
     }
     return [currentMoisture];
   }
 
   List<TimelineEvent> getTimeline(String sensorId, double currentMoisture) {
-    final List<TimelineEvent> combined = [
-      ...(_wateringEvents[sensorId] ?? const []),
-      ...(_alertEvents[sensorId] ?? const []),
-    ];
+    final List<TimelineEvent> combined = _isHardwareMode
+        ? [
+            ...(_wateringEvents[sensorId] ?? const []),
+            ...(_alertEvents[sensorId] ?? const []),
+          ]
+        : [
+            ...(_localSimulatedEvents[sensorId] ?? const []),
+            ...(_wateringEvents[sensorId] ?? const []),
+            ...(_alertEvents[sensorId] ?? const []),
+          ];
     combined.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     return combined;
   }
 
   List<TimelineEvent> getAllGardenTimeline() {
     final List<TimelineEvent> all = [];
+    if (!_isHardwareMode) {
+      _localSimulatedEvents.forEach((_, list) => all.addAll(list));
+    }
     _wateringEvents.forEach((_, list) => all.addAll(list));
     _alertEvents.forEach((_, list) => all.addAll(list));
     all.sort((a, b) => b.timestamp.compareTo(a.timestamp));
@@ -585,7 +629,7 @@ class SensorProvider extends ChangeNotifier {
 
       final dailyCount = _dailyAutoWateringCount[sId] ?? 0;
       if (dailyCount >= 3) {
-        await _recordSeparatedEvent(
+        await _recordHardwareEvent(
           sId,
           "Günlük Otomatik Sulama Limiti Doldu (${plant.name})",
           "Güvenlik amacıyla günde en fazla 3 kez otomatik sulama yapılır.",
@@ -597,7 +641,7 @@ class SensorProvider extends ChangeNotifier {
       _lastAutoWateringTimestamp[sId] = now;
       _dailyAutoWateringCount[sId] = dailyCount + 1;
 
-      await _recordSeparatedEvent(
+      await _recordHardwareEvent(
         sId,
         "Otomatik Sulama Başlatıldı (${plant.name})",
         "Nem %${sensor.moisture.toInt()} < Eşik %${plant.minMoisture}. Pompa $_maxPumpSeconds sn süreyle tetiklendi.",
@@ -626,12 +670,21 @@ class SensorProvider extends ChangeNotifier {
     final sensor = getSensor(sensorId);
 
     if (autoWatering == true && (sensor == null || !sensor.isOnlineWithThreshold(_offlineTimeoutMinutes))) {
-      await _recordSeparatedEvent(
-        sensorId,
-        "Otomatik Sulama Güvenlik Kilidi ($sensorId)",
-        "Sensör verisi güncel olmadığı için otomatik sulama reddedildi.",
-        'alert',
-      );
+      if (_isHardwareMode) {
+        await _recordHardwareEvent(
+          sensorId,
+          "Otomatik Sulama Güvenlik Kilidi ($sensorId)",
+          "Sensör verisi güncel olmadığı için otomatik sulama reddedildi.",
+          'alert',
+        );
+      } else {
+        _recordLocalSimulatedEvent(
+          sensorId,
+          "Otomatik Sulama Kilidi ($sensorId)",
+          "Simülasyon sensörü çevrimdışı göründüğü için tetiklenmedi.",
+          'alert',
+        );
+      }
       return;
     }
 
@@ -653,8 +706,38 @@ class SensorProvider extends ChangeNotifier {
 
     _pumpStates[sensorId] = updated;
 
+    // Simülasyon modundaysa Firebase'e ASLA yazma; yalnızca yerel simülasyon durumunu güncelle
+    if (!_isHardwareMode) {
+      if (requestedState) {
+        final current = getSensor(sensorId);
+        final pre = current?.moisture ?? 30.0;
+        final nextMoisture = (pre + 22.0).clamp(0.0, 95.0);
+        await simulateSensorReading(
+          sensorId: sensorId,
+          moisture: nextMoisture,
+          temperature: current?.temperature ?? 24.0,
+          light: current?.light ?? 65.0,
+        );
+        _wateringReports[sensorId] = WateringEffectivenessReport(
+          sensorId: sensorId,
+          preMoisture: pre,
+          postMoisture: nextMoisture,
+          timestamp: now,
+        );
+      }
+
+      _recordLocalSimulatedEvent(
+        sensorId,
+        requestedState ? "Pompa Simülasyonu: AÇIK ($sensorId)" : "Pompa Simülasyonu: KAPALI ($sensorId)",
+        "Yerel simülasyon çalıştırıldı (${effectiveDuration}sn). Firebase'e yazılmadı.",
+        'watering',
+      );
+      return;
+    }
+
+    // Gerçek donanım modu akışı
     _pumpWatchdogTimers[sensorId]?.cancel();
-    if (_isHardwareMode && requestedState) {
+    if (requestedState) {
       _pumpWatchdogTimers[sensorId] = Timer(const Duration(seconds: 20), () async {
         final currentState = _pumpStates[sensorId];
         if (currentState != null && currentState.requestedState && !currentState.actualState) {
@@ -666,7 +749,7 @@ class SensorProvider extends ChangeNotifier {
             updatedAt: DateTime.now().millisecondsSinceEpoch,
             timedOut: true,
           );
-          await _recordSeparatedEvent(
+          await _recordHardwareEvent(
             sensorId,
             "Pompa Komutu Zaman Aşımı ($sensorId)",
             "ESP32 20 sn içinde onay vermediği için komut güvenlik amacıyla iptal edildi.",
@@ -682,30 +765,10 @@ class SensorProvider extends ChangeNotifier {
       });
     }
 
-    if (!_isHardwareMode && requestedState) {
-      final current = getSensor(sensorId);
-      final pre = current?.moisture ?? 30.0;
-      final nextMoisture = (pre + 22.0).clamp(0.0, 95.0);
-      await simulateSensorReading(
-        sensorId: sensorId,
-        moisture: nextMoisture,
-        temperature: current?.temperature ?? 24.0,
-        light: current?.light ?? 65.0,
-      );
-      _wateringReports[sensorId] = WateringEffectivenessReport(
-        sensorId: sensorId,
-        preMoisture: pre,
-        postMoisture: nextMoisture,
-        timestamp: now,
-      );
-    }
-
-    await _recordSeparatedEvent(
+    await _recordHardwareEvent(
       sensorId,
       requestedState ? "Pompa Komutu: AÇIK ($sensorId)" : "Pompa Komutu: KAPALI ($sensorId)",
-      _isHardwareMode
-          ? "ESP32 onayı bekleniyor (Maks. süre: ${effectiveDuration}sn)."
-          : "Simülasyon modunda pompa çalıştırıldı (${effectiveDuration}sn).",
+      "ESP32 onayı bekleniyor (Maks. süre: ${effectiveDuration}sn).",
       'watering',
     );
 
@@ -739,7 +802,7 @@ class SensorProvider extends ChangeNotifier {
     );
 
     _simulatedSensors[sensorId] = simulated;
-    await _appendAndPersistHistoryPoint(
+    _appendSimulatedHistoryPoint(
       sensorId,
       TelemetryPoint(
         timestamp: now,
@@ -749,18 +812,13 @@ class SensorProvider extends ChangeNotifier {
       ),
     );
 
-    final linkedPlant = _authorizedPlantsBySensor[sensorId];
-    if (linkedPlant != null) {
-      if (moisture < linkedPlant.minMoisture) {
-        await _recordSeparatedEvent(
-          sensorId,
-          "Kritik Nem Uyarısı (${linkedPlant.name})",
-          "Toprak nemi %${moisture.toInt()} seviyesine düştü (Eşik: %${linkedPlant.minMoisture}).",
-          'alert',
-        );
-      }
-      await _checkAndTriggerAutoWatering(linkedPlant, simulated);
-    }
+    _recordLocalSimulatedEvent(
+      sensorId,
+      "Simülasyon Ölçümü ($sensorId)",
+      "Nem: %${moisture.toInt()} - Sıcaklık: ${temperature.toStringAsFixed(1)}C - Işık: %${light.toInt()}",
+      'sensor',
+    );
+    notifyListeners();
   }
 
   Future<void> ensureSensorExists(String sensorId, {double initialMoisture = 50.0}) async {
