@@ -1,7 +1,7 @@
 class SensorConfig {
   final String sensorId;
-  final int dryAdcValue; // Kuru toprak ham ADC (Örn: 3200)
-  final int wetAdcValue; // Islak toprak ham ADC (Örn: 1400)
+  final int dryAdcValue;
+  final int wetAdcValue;
   final int readIntervalSeconds;
   final int maxPumpSeconds;
 
@@ -13,7 +13,6 @@ class SensorConfig {
     this.maxPumpSeconds = 15,
   });
 
-  // Ham ADC değerini kalibrasyon sınırlarına göre %0-%100 nem değerine dönüştürür
   double convertAdcToMoisture(int rawAdc) {
     final span = (dryAdcValue - wetAdcValue).abs();
     if (span == 0) return 50.0;
@@ -90,9 +89,9 @@ class WateringEffectivenessReport {
 
   String get summaryText {
     if (isEffective) {
-      return "Sulama öncesi %${preMoisture.toInt()} → Sonrası %${postMoisture.toInt()} (+\%${delta.toInt()} artış, kök emilimi doğrulandı).";
+      return "Sulama öncesi %${preMoisture.toInt()} -> Sonrası %${postMoisture.toInt()} (+%${delta.toInt()} artış, kök emilimi doğrulandı).";
     }
-    return "Pompa çalıştı (%${preMoisture.toInt()} → \%${postMoisture.toInt()}) ancak beklenen nem artışı görülmedi. Su deposunu ve hortumu kontrol edin.";
+    return "Pompa çalıştı (%${preMoisture.toInt()} -> %${postMoisture.toInt()}) ancak beklenen nem artışı görülmedi. Su deposunu ve hortumu kontrol edin.";
   }
 }
 
@@ -136,14 +135,22 @@ class SensorData {
     return fallback;
   }
 
+  /// Eksik veya geçersiz zaman damgası için 0 döndürür; ölçüm zamanını uydurmaz.
   static int normalizeTimestamp(dynamic rawTimestamp) {
     final now = DateTime.now().millisecondsSinceEpoch;
     final parsed = parseSafeInt(rawTimestamp, fallback: 0);
-    if (parsed <= 0) return 0; // Eksik zaman damgasını gizlemez, 0 olarak işaretler
+    if (parsed <= 0) return 0;
+
+    // 10 haneli saniye cinsinden Unix timestamp -> milisaniye
+    if (parsed > 1577836800 && parsed < 1577836800000) {
+      return parsed * 1000;
+    }
+
+    // 2020 öncesi (örneğin ESP32 millis() değeri) gerçek duvar saati değildir
     if (parsed < 1577836800000) {
-      if (parsed > 1577836800) return parsed * 1000;
       return now;
     }
+
     return parsed;
   }
 
@@ -154,7 +161,10 @@ class SensorData {
     bool isSimulated = false,
   }) {
     final int? adc = map['rawAdc'] != null ? parseSafeInt(map['rawAdc'], fallback: 0) : null;
-    final bool missing = map['moisture'] == null && adc == null;
+    final bool hasMoistureOrAdc = map['moisture'] != null || adc != null;
+    final bool hasTemp = map['temperature'] != null;
+    final bool hasLight = map['light'] != null;
+    final bool missing = !hasMoistureOrAdc || !hasTemp || !hasLight;
 
     double resolvedMoisture;
     if (adc != null && config != null) {
@@ -171,7 +181,7 @@ class SensorData {
       temperature: parseSafeDouble(map['temperature'], fallback: 24.0),
       light: parseSafeDouble(map['light'], fallback: 60.0).clamp(0.0, 100.0),
       rawAdc: adc,
-      lastUpdate: normalizedTs > 0 ? normalizedTs : DateTime.now().millisecondsSinceEpoch,
+      lastUpdate: normalizedTs,
       isSimulated: isSimulated || map['isSimulated'] == true,
       hasMissingFields: missing,
     );
@@ -191,6 +201,7 @@ class SensorData {
   bool isOnlineWithThreshold(int timeoutMinutes) {
     if (lastUpdate <= 0) return false;
     final difference = DateTime.now().millisecondsSinceEpoch - lastUpdate;
+    if (difference < 0) return false;
     return difference < timeoutMinutes * 60 * 1000;
   }
 
