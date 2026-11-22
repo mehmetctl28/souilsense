@@ -192,10 +192,10 @@ ESP32 tarafında kod geliştirirken mobil uygulamayla tam uyum için aşağıdak
 
 Çakışmaları (Merge Conflict) önlemek için doğrudan `main` dalına (branch) `push` yapılmaz:
 
-1. Yeni bir özellik veya düzeltme öncesi güncel `main` dalından yeni bir dal açın:
+1. Yeni bir özellik veya düzeltme öncesi güncel `master` dalından yeni bir dal açın:
    ```bash
-   git checkout main
-   git pull origin main
+   git checkout master
+   git pull origin master
    git checkout -b feature/ozellik-adi
    ```
 2. Değişikliklerinizi yaptıktan sonra `flutter test` komutunun hatasız geçtiğini doğrulayın.

@@ -1,0 +1,34 @@
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid"
+      }
+    },
+    "sensorOwners": {
+      "$sensorId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.val() == auth.uid)"
+      }
+    },
+    "sensors": {
+      "$sensorId": {
+        ".read": "auth != null && root.child('sensorOwners').child($sensorId).val() == auth.uid",
+        ".write": "auth != null && (!root.child('sensorOwners').child($sensorId).exists() || root.child('sensorOwners').child($sensorId).val() == auth.uid)"
+      }
+    },
+    "pumpCommands": {
+      "$sensorId": {
+        ".read": "auth != null && root.child('sensorOwners').child($sensorId).val() == auth.uid",
+        ".write": "auth != null && root.child('sensorOwners').child($sensorId).val() == auth.uid"
+      }
+    },
+    "sensorConfigs": {
+      "$sensorId": {
+        ".read": "auth != null && root.child('sensorOwners').child($sensorId).val() == auth.uid",
+        ".write": "auth != null && root.child('sensorOwners').child($sensorId).val() == auth.uid"
+      }
+    }
+  }
+}
