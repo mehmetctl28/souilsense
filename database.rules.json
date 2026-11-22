@@ -6,16 +6,22 @@
         ".write": "auth != null && auth.uid == $uid"
       }
     },
+    "pairingCodes": {
+      "$sensorId": {
+        ".read": "auth != null",
+        ".write": "auth != null && !data.exists()"
+      }
+    },
     "sensorOwners": {
       "$sensorId": {
         ".read": "auth != null",
-        ".write": "auth != null && (!data.exists() || data.val() == auth.uid)"
+        ".write": "auth != null && !data.exists() && root.child('pairingCodes').child($sensorId).exists()"
       }
     },
     "sensors": {
       "$sensorId": {
         ".read": "auth != null && root.child('sensorOwners').child($sensorId).val() == auth.uid",
-        ".write": "auth != null && (!root.child('sensorOwners').child($sensorId).exists() || root.child('sensorOwners').child($sensorId).val() == auth.uid)"
+        ".write": "auth != null && root.child('sensorOwners').child($sensorId).val() == auth.uid"
       }
     },
     "pumpCommands": {
