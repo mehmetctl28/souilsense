@@ -23,7 +23,8 @@ void main() async {
   final prefs = await SharedPreferences.getInstance();
   final bool initialHardwareMode = prefs.getBool('is_hardware_mode') ?? false;
   final int initialMaxPumpSeconds = prefs.getInt('max_pump_seconds') ?? 15;
-  final int initialOfflineMinutes = prefs.getInt('offline_timeout_minutes') ?? 30;
+  final int initialOfflineMinutes =
+      prefs.getInt('offline_timeout_minutes') ?? 30;
 
   runApp(
     MyApp(
@@ -71,13 +72,15 @@ class MyApp extends StatelessWidget {
             return sp;
           },
         ),
-        ChangeNotifierProxyProvider2<PlantProvider, SensorProvider, TodoProvider>(
+        ChangeNotifierProxyProvider2<PlantProvider, SensorProvider,
+            TodoProvider>(
           create: (_) => TodoProvider(),
           update: (_, plantProvider, sensorProvider, todoProvider) {
             final todo = todoProvider ?? TodoProvider();
             todo.onTelemetryOrPlantsUpdated(
               plantProvider.plants,
               sensorProvider.sensors,
+              isHardwareMode: sensorProvider.isHardwareMode,
             );
             return todo;
           },

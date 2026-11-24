@@ -53,7 +53,8 @@ class PlantProvider extends ChangeNotifier {
       _plants = loaded;
       notifyListeners();
     }, onError: (error) {
-      _lastError = "Veritabanı erişim hatası (Firebase Rules kontrol edin): $error";
+      _lastError =
+          "Veritabanı erişim hatası (Firebase Rules kontrol edin): $error";
       debugPrint(_lastError);
       notifyListeners();
     });
@@ -111,7 +112,8 @@ class PlantProvider extends ChangeNotifier {
     if (userId == null || trimmed.isEmpty) return false;
 
     final isUsed = _plants.any(
-      (p) => p.id != plantId && p.sensorId.toLowerCase() == trimmed.toLowerCase(),
+      (p) =>
+          p.id != plantId && p.sensorId.toLowerCase() == trimmed.toLowerCase(),
     );
     if (isUsed) return false;
 
@@ -129,7 +131,8 @@ class PlantProvider extends ChangeNotifier {
     try {
       await _userPlantsRef(userId).child(plantId).remove();
       // Bitki silindiğinde ilişkili otomatik görevleri de temizle
-      final todosSnap = await _rootRef.child('users').child(userId).child('todos').get();
+      final todosSnap =
+          await _rootRef.child('users').child(userId).child('todos').get();
       if (todosSnap.exists && todosSnap.value is Map) {
         final map = todosSnap.value as Map;
         for (final entry in map.entries) {
@@ -145,16 +148,6 @@ class PlantProvider extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint("Bitki silme hatası: $e");
-    }
-  }
-
-  Future<void> togglePump(String plantId, bool currentState) async {
-    final userId = _auth.currentUser?.uid;
-    if (userId == null) return;
-    try {
-      await _userPlantsRef(userId).child(plantId).update({'isPumpOn': currentState});
-    } catch (e) {
-      debugPrint("Pompa güncelleme hatası: $e");
     }
   }
 

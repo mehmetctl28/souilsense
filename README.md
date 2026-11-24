@@ -1,5 +1,11 @@
 #  SoilSense — Akıllı Bitki Telemetri ve Otonom Sulama Sistemi
 
+> **P0 çalışma dalı - cihaz protokolü v2:** Komut ve cihaz onayı ayrıldı; eşleştirme ve
+> sulama limitleri kurallarla doğrulanıyor. Bu dalın geçerli veri sözleşmesi,
+> geçiş adımları ve test komutları [P0 cihaz sözleşmesindedir](docs/P0_DEVICE_CONTRACT.md).
+> Aşağıdaki eski veri şeması/ESP32 örnekleri v1 referansıdır; v2 entegrasyonunda kullanılmaz.
+> Canlı Firebase yayını ve gerçek ESP32/pompa doğrulaması henüz yapılmadı.
+
 SoilSense; **ESP32** mikrodenetleyicilerinden gelen toprak nemi, ortam sıcaklığı, ışık şiddeti ve ham ADC verilerini **Firebase Realtime Database** üzerinden gerçek zamanlı işleyen, bitki türüne özel bilimsel eşik değerlerine göre otonom sulama kararları veren **Flutter** tabanlı bir IoT uygulamasıdır.
 
 ---

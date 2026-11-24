@@ -31,14 +31,16 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
     SensorProvider sensorProvider,
   ) async {
     final controller = TextEditingController(text: plant.sensorId);
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
 
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
           "${plant.name} • Sensör Eşleştir",
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor),
+          style: TextStyle(
+              fontSize: 18, fontWeight: FontWeight.bold, color: textColor),
         ),
         content: TextField(
           controller: controller,
@@ -103,12 +105,15 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
     }
 
     final int totalCount = allPlants.length;
-    final int thirstyCount = allPlants.where((p) => getLiveMoisture(p) < p.minMoisture).length;
-    final int healthyCount = allPlants.where((p) => getLiveMoisture(p) >= p.minMoisture).length;
+    final int thirstyCount =
+        allPlants.where((p) => getLiveMoisture(p) < p.minMoisture).length;
+    final int healthyCount =
+        allPlants.where((p) => getLiveMoisture(p) >= p.minMoisture).length;
     final int offlineCount = allPlants.where((p) => !isPlantOnline(p)).length;
 
     List<Plant> filteredPlants = allPlants.where((p) {
-      final matchesSearch = p.name.toLowerCase().contains(_searchQuery.toLowerCase());
+      final matchesSearch =
+          p.name.toLowerCase().contains(_searchQuery.toLowerCase());
       if (!matchesSearch) return false;
 
       final moisture = getLiveMoisture(p);
@@ -134,7 +139,8 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
       }
     });
 
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
     final cardColor = Theme.of(context).cardColor;
 
     return Scaffold(
@@ -151,17 +157,25 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                 children: [
                   Text(
                     "Bahçem",
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: textColor),
+                    style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: textColor),
                   ),
                   Row(
                     children: [
                       IconButton(
-                        tooltip: _sortByName ? "Neme Göre Sırala" : "İsme Göre Sırala",
+                        tooltip: _sortByName
+                            ? "Neme Göre Sırala"
+                            : "İsme Göre Sırala",
                         icon: Icon(
-                          _sortByName ? Icons.sort_by_alpha : Icons.water_drop_outlined,
+                          _sortByName
+                              ? Icons.sort_by_alpha
+                              : Icons.water_drop_outlined,
                           color: textColor,
                         ),
-                        onPressed: () => setState(() => _sortByName = !_sortByName),
+                        onPressed: () =>
+                            setState(() => _sortByName = !_sortByName),
                       ),
                       const SizedBox(width: 6),
                       GestureDetector(
@@ -169,7 +183,8 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                           FocusScope.of(context).unfocus();
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (_) => const AddPlantScreen()),
+                            MaterialPageRoute(
+                                builder: (_) => const AddPlantScreen()),
                           );
                         },
                         child: Container(
@@ -191,14 +206,16 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
 
               // 2. ARAMA ÇUBUĞU
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 decoration: BoxDecoration(
                   color: cardColor,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: TextField(
                   onChanged: (val) => setState(() => _searchQuery = val),
-                  onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
+                  onTapOutside: (_) =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
                   style: TextStyle(color: textColor),
                   decoration: const InputDecoration(
                     icon: Icon(Icons.search, color: Colors.grey),
@@ -217,13 +234,17 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                 physics: const BouncingScrollPhysics(),
                 child: Row(
                   children: [
-                    _buildFilterChip("Tümü · $totalCount", PlantFilter.all, cardColor, textColor),
+                    _buildFilterChip("Tümü · $totalCount", PlantFilter.all,
+                        cardColor, textColor),
                     const SizedBox(width: 8),
-                    _buildFilterChip("Sağlıklı · $healthyCount", PlantFilter.healthy, cardColor, textColor),
+                    _buildFilterChip("Sağlıklı · $healthyCount",
+                        PlantFilter.healthy, cardColor, textColor),
                     const SizedBox(width: 8),
-                    _buildFilterChip("Sulama gerekli · $thirstyCount", PlantFilter.thirsty, cardColor, textColor),
+                    _buildFilterChip("Sulama gerekli · $thirstyCount",
+                        PlantFilter.thirsty, cardColor, textColor),
                     const SizedBox(width: 8),
-                    _buildFilterChip("Çevrimdışı · $offlineCount", PlantFilter.offline, cardColor, textColor),
+                    _buildFilterChip("Çevrimdışı · $offlineCount",
+                        PlantFilter.offline, cardColor, textColor),
                   ],
                 ),
               ),
@@ -237,23 +258,30 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.local_florist_outlined, size: 56, color: Colors.grey.shade400),
+                            Icon(Icons.local_florist_outlined,
+                                size: 56, color: Colors.grey.shade400),
                             const SizedBox(height: 12),
                             Text(
                               "Bahçende henüz bitki yok.",
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor),
+                              style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: textColor),
                             ),
                             const SizedBox(height: 12),
                             ElevatedButton.icon(
                               onPressed: () {
                                 Navigator.push(
                                   context,
-                                  MaterialPageRoute(builder: (_) => const AddPlantScreen()),
+                                  MaterialPageRoute(
+                                      builder: (_) => const AddPlantScreen()),
                                 );
                               },
                               icon: const Icon(Icons.add, color: Colors.white),
-                              label: const Text("Bitki Ekle", style: TextStyle(color: Colors.white)),
-                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                              label: const Text("Bitki Ekle",
+                                  style: TextStyle(color: Colors.white)),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.primary),
                             ),
                           ],
                         ),
@@ -261,7 +289,8 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                     : GridView.builder(
                         physics: const BouncingScrollPhysics(),
                         itemCount: filteredPlants.length,
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
                           crossAxisSpacing: 16,
                           mainAxisSpacing: 16,
@@ -269,8 +298,10 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                         ),
                         itemBuilder: (context, index) {
                           final plant = filteredPlants[index];
-                          final sensor = sensorProvider.getSensor(plant.sensorId);
-                          final score = PlantIntelligence.calculateHealthScore(plant, sensor);
+                          final sensor =
+                              sensorProvider.getSensor(plant.sensorId);
+                          final score = PlantIntelligence.calculateHealthScore(
+                              plant, sensor);
 
                           return _buildGardenCard(
                             context,
@@ -294,7 +325,8 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
     );
   }
 
-  Widget _buildFilterChip(String label, PlantFilter filter, Color cardColor, Color textColor) {
+  Widget _buildFilterChip(
+      String label, PlantFilter filter, Color cardColor, Color textColor) {
     final bool isSelected = _selectedFilter == filter;
     return GestureDetector(
       onTap: () => setState(() => _selectedFilter = filter),
@@ -328,15 +360,20 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
     Color cardColor,
     Color textColor,
   ) {
-    final bool isThirsty = liveMoisture < plant.minMoisture;
-    final Color statusColor = isThirsty ? AppColors.statusCritical : AppColors.statusGood;
+    final bool hasMeasurement =
+        sensorProvider.getSensor(plant.sensorId)?.isValidMeasurement == true;
+    final bool isThirsty =
+        isOnline && hasMeasurement && liveMoisture < plant.minMoisture;
+    final Color statusColor =
+        isThirsty ? AppColors.statusCritical : AppColors.statusGood;
 
     return GestureDetector(
       onTap: () {
         FocusScope.of(context).unfocus();
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => PlantDetailScreen(plantId: plant.id)),
+          MaterialPageRoute(
+              builder: (_) => PlantDetailScreen(plantId: plant.id)),
         );
       },
       child: Container(
@@ -352,31 +389,35 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                 fit: StackFit.expand,
                 children: [
                   ClipRRect(
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                    child: (plant.imageUrl != null && plant.imageUrl!.isNotEmpty)
-                        ? Image.network(
-                            plant.imageUrl!,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                              color: cardColor,
-                              child: Icon(Icons.local_florist_outlined,
-                                  color: Colors.grey.shade400, size: 32),
-                            ),
-                          )
-                        : Container(
-                            color: cardColor,
-                            child: Icon(Icons.local_florist_outlined,
-                                color: Colors.grey.shade400, size: 32),
-                          ),
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(24)),
+                    child:
+                        (plant.imageUrl != null && plant.imageUrl!.isNotEmpty)
+                            ? Image.network(
+                                plant.imageUrl!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Container(
+                                  color: cardColor,
+                                  child: Icon(Icons.local_florist_outlined,
+                                      color: Colors.grey.shade400, size: 32),
+                                ),
+                              )
+                            : Container(
+                                color: cardColor,
+                                child: Icon(Icons.local_florist_outlined,
+                                    color: Colors.grey.shade400, size: 32),
+                              ),
                   ),
                   // Sol Üst: Tıklanabilir Sensör ID Rozeti (4.2.7 Sensör Değiştirme)
                   Positioned(
                     top: 10,
                     left: 10,
                     child: GestureDetector(
-                      onTap: () => _showEditSensorDialog(context, plant, plantProvider, sensorProvider),
+                      onTap: () => _showEditSensorDialog(
+                          context, plant, plantProvider, sensorProvider),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.black.withOpacity(0.6),
                           borderRadius: BorderRadius.circular(12),
@@ -387,7 +428,9 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                             Icon(
                               Icons.circle,
                               size: 8,
-                              color: isOnline ? AppColors.statusGood : Colors.orangeAccent,
+                              color: isOnline
+                                  ? AppColors.statusGood
+                                  : Colors.orangeAccent,
                             ),
                             const SizedBox(width: 4),
                             Text(
@@ -399,7 +442,8 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                               ),
                             ),
                             const SizedBox(width: 3),
-                            const Icon(Icons.edit, size: 10, color: Colors.white70),
+                            const Icon(Icons.edit,
+                                size: 10, color: Colors.white70),
                           ],
                         ),
                       ),
@@ -412,22 +456,27 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                     child: GestureDetector(
                       onTap: isThirsty
                           ? () async {
-                              await plantProvider.togglePump(plant.id, true);
-                              await sensorProvider.requestPumpState(
+                              final sent =
+                                  await sensorProvider.requestPumpState(
                                 sensorId: plant.sensorId,
                                 requestedState: true,
                               );
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: Text("${plant.name} hızlı sulandı! 💧"),
+                                    content: Text(sent
+                                        ? (sensorProvider.isHardwareMode
+                                            ? 'Komut gönderildi; cihaz onayı bekleniyor.'
+                                            : 'Yerel sulama simülasyonu çalıştı.')
+                                        : 'Komut gönderilemedi. Cihaz durumunu kontrol edin.'),
                                   ),
                                 );
                               }
                             }
                           : null,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
                           color: statusColor,
                           borderRadius: BorderRadius.circular(14),
@@ -442,7 +491,11 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              isThirsty ? "Sula" : "İyi",
+                              !hasMeasurement
+                                  ? "Veri yok"
+                                  : isThirsty
+                                      ? "Sula"
+                                      : "İyi",
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 12,
@@ -470,11 +523,16 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                           plant.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: textColor),
+                          style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: textColor),
                         ),
                       ),
                       Text(
-                        "${liveTemp.toStringAsFixed(0)}°C",
+                        hasMeasurement
+                            ? "${liveTemp.toStringAsFixed(0)}°C"
+                            : "--",
                         style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
@@ -490,7 +548,9 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                       value: (liveMoisture / 100).clamp(0.0, 1.0),
                       minHeight: 6,
                       backgroundColor: Colors.grey.withOpacity(0.18),
-                      color: isThirsty ? AppColors.statusCritical : AppColors.primary,
+                      color: isThirsty
+                          ? AppColors.statusCritical
+                          : AppColors.primary,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -498,7 +558,9 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        "%${liveMoisture.toInt()} (Sınır %${plant.minMoisture})",
+                        hasMeasurement
+                            ? "%${liveMoisture.toInt()} (Sınır %${plant.minMoisture})"
+                            : "Geçerli ölçüm yok",
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
@@ -510,7 +572,9 @@ class _MyPlantsScreenState extends State<MyPlantsScreen> {
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: healthScore >= 75 ? AppColors.statusGood : Colors.orange,
+                          color: healthScore >= 75
+                              ? AppColors.statusGood
+                              : Colors.orange,
                         ),
                       ),
                     ],

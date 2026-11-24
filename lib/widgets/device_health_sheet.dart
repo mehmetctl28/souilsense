@@ -27,7 +27,8 @@ class DeviceHealthSheet extends StatelessWidget {
     final sensorProvider = Provider.of<SensorProvider>(context);
     final plants = plantProvider.plants;
 
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
 
     return SafeArea(
@@ -41,27 +42,38 @@ class DeviceHealthSheet extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.developer_board, color: AppColors.primary, size: 26),
+                  const Icon(Icons.developer_board,
+                      color: AppColors.primary, size: 26),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       "Cihaz Sağlık Merkezi (Device Health)",
-                      style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: textColor),
+                      style: TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.bold,
+                          color: textColor),
                     ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: (sensorProvider.isHardwareMode ? AppColors.statusGood : Colors.blue)
+                      color: (sensorProvider.isHardwareMode
+                              ? AppColors.statusGood
+                              : Colors.blue)
                           .withOpacity(0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      sensorProvider.isHardwareMode ? "DONANIM MODU" : "SİMÜLASYON",
+                      sensorProvider.isHardwareMode
+                          ? "DONANIM MODU"
+                          : "SİMÜLASYON",
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
-                        color: sensorProvider.isHardwareMode ? AppColors.statusGood : Colors.blue,
+                        color: sensorProvider.isHardwareMode
+                            ? AppColors.statusGood
+                            : Colors.blue,
                       ),
                     ),
                   ),
@@ -89,13 +101,15 @@ class DeviceHealthSheet extends StatelessWidget {
                           final sensor = sensorProvider.getSensor(sId);
                           final config = sensorProvider.getSensorConfig(sId);
                           final pump = sensorProvider.getPumpState(sId);
-                          final history = sensorProvider.getTelemetryHistory(sId);
+                          final history =
+                              sensorProvider.getTelemetryHistory(sId);
 
                           final report = PlantIntelligence.diagnoseSensor(
                             sId,
                             sensor,
                             history: history,
-                            offlineTimeoutMinutes: sensorProvider.offlineTimeoutMinutes,
+                            offlineTimeoutMinutes:
+                                sensorProvider.offlineTimeoutMinutes,
                           );
 
                           return Container(
@@ -112,7 +126,8 @@ class DeviceHealthSheet extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     Expanded(
                                       child: Text(
@@ -125,9 +140,11 @@ class DeviceHealthSheet extends StatelessWidget {
                                       ),
                                     ),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 3),
                                       decoration: BoxDecoration(
-                                        color: report.badgeColor.withOpacity(0.15),
+                                        color:
+                                            report.badgeColor.withOpacity(0.15),
                                         borderRadius: BorderRadius.circular(8),
                                       ),
                                       child: Text(
@@ -144,7 +161,8 @@ class DeviceHealthSheet extends StatelessWidget {
                                 const SizedBox(height: 8),
                                 Text(
                                   report.detailText,
-                                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Colors.grey),
                                 ),
                                 const Divider(height: 18),
                                 Wrap(
@@ -158,7 +176,9 @@ class DeviceHealthSheet extends StatelessWidget {
                                     ),
                                     _buildMetricChip(
                                       "Ham ADC",
-                                      sensor?.rawAdc != null ? "${sensor!.rawAdc}" : "Yüzde Modu",
+                                      sensor?.rawAdc != null
+                                          ? "${sensor!.rawAdc}"
+                                          : "Yüzde Modu",
                                       textColor,
                                     ),
                                     _buildMetricChip(
@@ -168,12 +188,10 @@ class DeviceHealthSheet extends StatelessWidget {
                                     ),
                                     _buildMetricChip(
                                       "Pompa Yanıtı",
+                                      pump.label,
                                       pump.timedOut
-                                          ? "ZAMAN AŞIMI (Hata)"
-                                          : (pump.isPendingConfirmation
-                                              ? "ESP32 Onayı Bekleniyor"
-                                              : (pump.actualState ? "Çalışıyor" : "Hazır (Kapalı)")),
-                                      pump.timedOut ? AppColors.statusCritical : textColor,
+                                          ? AppColors.statusCritical
+                                          : textColor,
                                     ),
                                   ],
                                 ),
@@ -198,7 +216,8 @@ class DeviceHealthSheet extends StatelessWidget {
         const SizedBox(height: 2),
         Text(
           value,
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: valueColor),
+          style: TextStyle(
+              fontSize: 12, fontWeight: FontWeight.bold, color: valueColor),
         ),
       ],
     );

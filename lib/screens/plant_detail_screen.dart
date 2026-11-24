@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/sensor_pairing_card.dart';
 import 'package:provider/provider.dart';
 import '../providers/plant_provider.dart';
 import '../providers/sensor_provider.dart';
@@ -14,7 +15,8 @@ class PlantDetailScreen extends StatelessWidget {
   const PlantDetailScreen({super.key, required this.plantId});
 
   String _formatTime(int timestamp) {
-    final diff = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(timestamp));
+    final diff = DateTime.now()
+        .difference(DateTime.fromMillisecondsSinceEpoch(timestamp));
     if (diff.inMinutes < 1) return "Az önce";
     if (diff.inMinutes < 60) return "${diff.inMinutes} dk önce";
     if (diff.inHours < 24) return "${diff.inHours} sa önce";
@@ -30,14 +32,16 @@ class PlantDetailScreen extends StatelessWidget {
     final liveSensor = sensorProvider.getSensor(sensorId);
     final dryCtrl = TextEditingController(text: config.dryAdcValue.toString());
     final wetCtrl = TextEditingController(text: config.wetAdcValue.toString());
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
 
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
           "Sensör Kalibrasyon Sihirbazı ($sensorId)",
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: textColor),
+          style: TextStyle(
+              fontSize: 17, fontWeight: FontWeight.bold, color: textColor),
         ),
         content: SingleChildScrollView(
           child: Column(
@@ -86,7 +90,8 @@ class PlantDetailScreen extends StatelessWidget {
               if ((dry - wet).abs() < 200) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text("Kuru ve ıslak ADC değerleri arasında en az 200 fark olmalıdır."),
+                    content: Text(
+                        "Kuru ve ıslak ADC değerleri arasında en az 200 fark olmalıdır."),
                   ),
                 );
                 return;
@@ -102,7 +107,8 @@ class PlantDetailScreen extends StatelessWidget {
               );
               if (ctx.mounted) Navigator.pop(ctx);
             },
-            child: const Text("Kalibrasyonu Kaydet", style: TextStyle(color: Colors.white)),
+            child: const Text("Kalibrasyonu Kaydet",
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -121,18 +127,22 @@ class PlantDetailScreen extends StatelessWidget {
     final plant = plantProvider.plants[plantIndex];
 
     final SensorData? liveSensor = sensorProvider.getSensor(plant.sensorId);
-    final double liveMoisture = liveSensor != null ? liveSensor.moisture : plant.moistureLevel;
-    final double liveTemp = liveSensor != null ? liveSensor.temperature : plant.temperature;
-    final double liveLight = liveSensor != null ? liveSensor.light : plant.lightLevel;
+    final double liveMoisture =
+        liveSensor != null ? liveSensor.moisture : plant.moistureLevel;
+    final double liveTemp =
+        liveSensor != null ? liveSensor.temperature : plant.temperature;
+    final double liveLight =
+        liveSensor != null ? liveSensor.light : plant.lightLevel;
     final bool isOnline = sensorProvider.isSensorOnline(plant.sensorId);
 
     final pumpState = sensorProvider.getPumpState(
       plant.sensorId,
-      fallbackPumpOn: plant.isPumpOn,
     );
     final telemetryPoints = sensorProvider.getTelemetryHistory(plant.sensorId);
-    final historyValues = sensorProvider.getMoistureHistory(plant.sensorId, liveMoisture);
-    final timelineEvents = sensorProvider.getTimeline(plant.sensorId, liveMoisture);
+    final historyValues =
+        sensorProvider.getMoistureHistory(plant.sensorId, liveMoisture);
+    final timelineEvents =
+        sensorProvider.getTimeline(plant.sensorId, liveMoisture);
     final wateringReport = sensorProvider.getWateringReport(plant.sensorId);
 
     // 4. Bölüm: Veri tazeliği kontrollü Sağlık Skoru ve Plant Intelligence 2.0
@@ -169,7 +179,8 @@ class PlantDetailScreen extends StatelessWidget {
       }
     }
 
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
     final cardColor = Theme.of(context).cardColor;
     final bottomPadding = MediaQuery.of(context).padding.bottom + 24;
 
@@ -190,7 +201,8 @@ class PlantDetailScreen extends StatelessWidget {
                       ? Image.network(
                           plant.imageUrl!,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(color: AppColors.secondary),
+                          errorBuilder: (_, __, ___) =>
+                              Container(color: AppColors.secondary),
                         )
                       : Container(color: AppColors.secondary),
                   Container(
@@ -208,7 +220,8 @@ class PlantDetailScreen extends StatelessWidget {
                   SafeArea(
                     bottom: false,
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -217,14 +230,16 @@ class PlantDetailScreen extends StatelessWidget {
                             radius: 22,
                             backgroundColor: Colors.black.withOpacity(0.35),
                             child: IconButton(
-                              icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+                              icon: const Icon(Icons.arrow_back_ios_new,
+                                  color: Colors.white, size: 18),
                               onPressed: () => Navigator.pop(context),
                             ),
                           ),
                           Flexible(
                             child: Container(
                               margin: const EdgeInsets.symmetric(horizontal: 8),
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
                               decoration: BoxDecoration(
                                 color: Colors.black.withOpacity(0.50),
                                 borderRadius: BorderRadius.circular(16),
@@ -234,7 +249,9 @@ class PlantDetailScreen extends StatelessWidget {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  color: healthResult.isFresh ? Colors.white : Colors.orangeAccent,
+                                  color: healthResult.isFresh
+                                      ? Colors.white
+                                      : Colors.orangeAccent,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 12,
                                 ),
@@ -245,7 +262,8 @@ class PlantDetailScreen extends StatelessWidget {
                             radius: 22,
                             backgroundColor: Colors.black.withOpacity(0.35),
                             child: IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.white, size: 20),
+                              icon: const Icon(Icons.delete_outline,
+                                  color: Colors.white, size: 20),
                               onPressed: () {
                                 plantProvider.deletePlant(plant.id);
                                 Navigator.pop(context);
@@ -275,7 +293,8 @@ class PlantDetailScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
                             color: Colors.black.withOpacity(0.45),
                             borderRadius: BorderRadius.circular(12),
@@ -286,7 +305,9 @@ class PlantDetailScreen extends StatelessWidget {
                               Icon(
                                 Icons.circle,
                                 size: 8,
-                                color: isOnline ? AppColors.statusGood : Colors.orangeAccent,
+                                color: isOnline
+                                    ? AppColors.statusGood
+                                    : Colors.orangeAccent,
                               ),
                               const SizedBox(width: 6),
                               Flexible(
@@ -294,7 +315,8 @@ class PlantDetailScreen extends StatelessWidget {
                                   "Düğüm: ${plant.sensorId} • ${sensorReport.statusText}",
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 12),
                                 ),
                               ),
                             ],
@@ -315,7 +337,8 @@ class PlantDetailScreen extends StatelessWidget {
                 unselectedLabelColor: Colors.grey,
                 indicatorColor: AppColors.primary,
                 indicatorWeight: 3,
-                labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                labelStyle:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 tabs: const [
                   Tab(icon: Icon(Icons.bar_chart_outlined), text: "Analiz"),
                   Tab(icon: Icon(Icons.psychology_outlined), text: "Zekâ 2.0"),
@@ -346,14 +369,18 @@ class PlantDetailScreen extends StatelessWidget {
                               children: [
                                 _buildStatItem(
                                   Icons.water_drop,
-                                  "%${liveMoisture.toInt()}",
+                                  liveSensor?.isValidMeasurement == true
+                                      ? "%${liveMoisture.toInt()}"
+                                      : "--",
                                   "Nem (%${plant.minMoisture}-${plant.maxMoisture})",
                                   textColor,
                                 ),
                                 _buildVerticalDivider(),
                                 _buildStatItem(
                                   Icons.thermostat,
-                                  "${liveTemp.toStringAsFixed(1)}°C",
+                                  liveSensor?.isValidMeasurement == true
+                                      ? "${liveTemp.toStringAsFixed(1)}°C"
+                                      : "--",
                                   "Sıcaklık",
                                   textColor,
                                   iconColor: Colors.orange,
@@ -361,7 +388,9 @@ class PlantDetailScreen extends StatelessWidget {
                                 _buildVerticalDivider(),
                                 _buildStatItem(
                                   Icons.wb_sunny,
-                                  "%${liveLight.toInt()}",
+                                  liveSensor?.isValidMeasurement == true
+                                      ? "%${liveLight.toInt()}"
+                                      : "--",
                                   "Işık",
                                   textColor,
                                   iconColor: Colors.amber,
@@ -372,7 +401,8 @@ class PlantDetailScreen extends StatelessWidget {
                             // 3.2: Saatlik Kuruma Hızı Bilgi Bandı
                             Container(
                               width: double.infinity,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
                               decoration: BoxDecoration(
                                 color: AppColors.primary.withOpacity(0.08),
                                 borderRadius: BorderRadius.circular(12),
@@ -395,6 +425,7 @@ class PlantDetailScreen extends StatelessWidget {
                                 ],
                               ),
                             ),
+                            SensorPairingCard(sensorId: plant.sensorId),
                             const Padding(
                               padding: EdgeInsets.symmetric(vertical: 14),
                               child: Divider(height: 1),
@@ -403,7 +434,8 @@ class PlantDetailScreen extends StatelessWidget {
                               children: [
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         "Sulama Pompası",
@@ -415,23 +447,30 @@ class PlantDetailScreen extends StatelessWidget {
                                       ),
                                       const SizedBox(height: 3),
                                       Text(
-                                        "Cihaz: ${pumpState.actualState ? 'Çalışıyor' : 'Kapalı'} • Komut: ${pumpState.requestedState ? 'Açık (${pumpState.maxDurationSeconds}sn)' : 'Beklemede'}",
-                                        style: const TextStyle(color: Colors.grey, fontSize: 12),
+                                        pumpState.label,
+                                        style: const TextStyle(
+                                            color: Colors.grey, fontSize: 12),
                                       ),
                                     ],
                                   ),
                                 ),
                                 const SizedBox(width: 8),
                                 Switch(
-                                  value: pumpState.requestedState,
+                                  value: pumpState.actualState ||
+                                      pumpState.isPendingConfirmation,
                                   activeColor: Colors.white,
                                   activeTrackColor: AppColors.primary,
-                                  onChanged: (val) {
-                                    plantProvider.togglePump(plant.id, val);
-                                    sensorProvider.requestPumpState(
+                                  onChanged: (val) async {
+                                    final sent =
+                                        await sensorProvider.requestPumpState(
                                       sensorId: plant.sensorId,
                                       requestedState: val,
                                     );
+                                    if (!sent && context.mounted)
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(const SnackBar(
+                                              content: Text(
+                                                  'Komut gönderilemedi. Cihaz durumunu kontrol edin.')));
                                   },
                                 ),
                               ],
@@ -441,7 +480,8 @@ class PlantDetailScreen extends StatelessWidget {
                               children: [
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         "Otomatik Sulama Modu",
@@ -454,7 +494,8 @@ class PlantDetailScreen extends StatelessWidget {
                                       const SizedBox(height: 3),
                                       Text(
                                         "Nem %${plant.minMoisture} altına düştüğünde pompayı otomatik tetikle",
-                                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                        style: const TextStyle(
+                                            fontSize: 12, color: Colors.grey),
                                       ),
                                     ],
                                   ),
@@ -464,12 +505,14 @@ class PlantDetailScreen extends StatelessWidget {
                                   value: pumpState.autoWatering,
                                   activeColor: Colors.white,
                                   activeTrackColor: AppColors.secondary,
-                                  onChanged: (val) {
-                                    sensorProvider.requestPumpState(
-                                      sensorId: plant.sensorId,
-                                      requestedState: pumpState.requestedState,
-                                      autoWatering: val,
-                                    );
+                                  onChanged: (val) async {
+                                    final saved = await sensorProvider
+                                        .setAutoWatering(plant.sensorId, val);
+                                    if (!saved && context.mounted)
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(const SnackBar(
+                                              content: Text(
+                                                  'Otomatik sulama ayarı kaydedilemedi.')));
                                   },
                                 ),
                               ],
@@ -510,9 +553,10 @@ class PlantDetailScreen extends StatelessWidget {
                             ),
                           ),
                           TextButton.icon(
-                            onPressed: () =>
-                                _showCalibrationDialog(context, plant.sensorId, sensorProvider),
-                            icon: const Icon(Icons.tune, size: 16, color: AppColors.primary),
+                            onPressed: () => _showCalibrationDialog(
+                                context, plant.sensorId, sensorProvider),
+                            icon: const Icon(Icons.tune,
+                                size: 16, color: AppColors.primary),
                             label: const Text(
                               "ADC Kalibre Et",
                               style: TextStyle(
@@ -552,7 +596,8 @@ class PlantDetailScreen extends StatelessWidget {
                                   ),
                                   const SizedBox(width: 6),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
                                     decoration: BoxDecoration(
                                       color: card.color.withOpacity(0.12),
                                       borderRadius: BorderRadius.circular(8),
@@ -581,11 +626,13 @@ class PlantDetailScreen extends StatelessWidget {
                           ),
                         );
                       }),
-
                       const SizedBox(height: 14),
                       Text(
                         "Kayıt Geçmişi (System Log)",
-                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: textColor),
+                        style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: textColor),
                       ),
                       const SizedBox(height: 10),
                       ...timelineEvents.map((ev) {
@@ -599,7 +646,9 @@ class PlantDetailScreen extends StatelessWidget {
                           child: Row(
                             children: [
                               Icon(
-                                ev.type == 'watering' ? Icons.water_drop_outlined : Icons.sensors,
+                                ev.type == 'watering'
+                                    ? Icons.water_drop_outlined
+                                    : Icons.sensors,
                                 color: AppColors.primary,
                                 size: 18,
                               ),
@@ -618,7 +667,8 @@ class PlantDetailScreen extends StatelessWidget {
                                     ),
                                     Text(
                                       ev.subtitle,
-                                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                      style: const TextStyle(
+                                          fontSize: 12, color: Colors.grey),
                                     ),
                                   ],
                                 ),
@@ -626,7 +676,8 @@ class PlantDetailScreen extends StatelessWidget {
                               const SizedBox(width: 8),
                               Text(
                                 _formatTime(ev.timestamp),
-                                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                style: const TextStyle(
+                                    fontSize: 11, color: Colors.grey),
                               ),
                             ],
                           ),
@@ -650,12 +701,14 @@ class PlantDetailScreen extends StatelessWidget {
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.info_outline, color: Colors.orange),
+                              const Icon(Icons.info_outline,
+                                  color: Colors.orange),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
                                   "'${plant.type}' türü katalogda bulunamadığı için standart bakım parametreleri gösteriliyor.",
-                                  style: TextStyle(fontSize: 13, color: textColor),
+                                  style:
+                                      TextStyle(fontSize: 13, color: textColor),
                                 ),
                               ),
                             ],
@@ -665,13 +718,19 @@ class PlantDetailScreen extends StatelessWidget {
                         matchedCatalog != null
                             ? "Bakım Kartı: ${matchedCatalog.name}"
                             : "Standart Bakım Rehberi",
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor),
+                        style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: textColor),
                       ),
                       const SizedBox(height: 10),
                       Text(
                         matchedCatalog?.description ??
                             "Toprak nemini düzenli takip edin ve bitkinizi doğrudan yakıcı güneş ışığından koruyun.",
-                        style: TextStyle(fontSize: 15, color: textColor.withOpacity(0.8), height: 1.5),
+                        style: TextStyle(
+                            fontSize: 15,
+                            color: textColor.withOpacity(0.8),
+                            height: 1.5),
                       ),
                       const SizedBox(height: 20),
                       _buildCareCard(
@@ -724,7 +783,9 @@ class PlantDetailScreen extends StatelessWidget {
       children: [
         Icon(icon, color: iconColor, size: 26),
         const SizedBox(height: 6),
-        Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: textColor)),
+        Text(value,
+            style: TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 17, color: textColor)),
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(color: Colors.grey, fontSize: 11)),
       ],
@@ -735,7 +796,8 @@ class PlantDetailScreen extends StatelessWidget {
     return Container(height: 40, width: 1, color: Colors.grey.withOpacity(0.2));
   }
 
-  Widget _buildCareCard(IconData icon, String title, String desc, Color cardColor, Color textColor) {
+  Widget _buildCareCard(IconData icon, String title, String desc,
+      Color cardColor, Color textColor) {
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
@@ -758,9 +820,14 @@ class PlantDetailScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
+                Text(title,
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: textColor)),
                 const SizedBox(height: 4),
-                Text(desc, style: const TextStyle(color: Colors.grey, fontSize: 14)),
+                Text(desc,
+                    style: const TextStyle(color: Colors.grey, fontSize: 14)),
               ],
             ),
           ),

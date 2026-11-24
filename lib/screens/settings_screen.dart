@@ -15,13 +15,16 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _showEditProfileDialog(AuthProvider authProvider) async {
-    final controller = TextEditingController(text: authProvider.currentUser?.displayName ?? "");
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final controller = TextEditingController(
+        text: authProvider.currentUser?.displayName ?? "");
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
 
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text("Profili Düzenle", style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+        title: Text("Profili Düzenle",
+            style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
         content: TextField(
           controller: controller,
           style: TextStyle(color: textColor),
@@ -55,7 +58,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _showSensorAndPumpSettings() async {
     final sensorProvider = Provider.of<SensorProvider>(context, listen: false);
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
     final cardColor = Theme.of(context).cardColor;
 
     showModalBottomSheet(
@@ -80,40 +84,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Text(
                       "Sensör ve Pompa Güvenlik Sınırları",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor),
+                      style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: textColor),
                     ),
                     const SizedBox(height: 16),
                     Text(
                       "Maksimum Pompa Çalışma Süresi: $tempPump sn",
-                      style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600, color: textColor),
                     ),
                     Slider(
                       value: tempPump.toDouble(),
-                      min: 5,
-                      max: 60,
-                      divisions: 11,
+                      min: 1,
+                      max: 30,
+                      divisions: 29,
                       activeColor: AppColors.primary,
-                      onChanged: (v) => setModalState(() => tempPump = v.round()),
+                      onChanged: (v) =>
+                          setModalState(() => tempPump = v.round()),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       "Sensör Çevrimdışı Uyarı Eşiği: $tempOffline dk",
-                      style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600, color: textColor),
                     ),
                     Slider(
                       value: tempOffline.toDouble(),
-                      min: 10,
-                      max: 120,
-                      divisions: 11,
+                      min: 1,
+                      max: 30,
+                      divisions: 29,
                       activeColor: AppColors.primary,
-                      onChanged: (v) => setModalState(() => tempOffline = v.round()),
+                      onChanged: (v) =>
+                          setModalState(() => tempOffline = v.round()),
                     ),
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
                       height: 48,
                       child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary),
                         onPressed: () async {
                           await sensorProvider.updateSafetySettings(
                             maxPumpSeconds: tempPump,
@@ -138,13 +150,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showPrivacyPolicy() {
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
           "Veri Mimarisi ve Güvenlik Politikası",
-          style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 17),
+          style: TextStyle(
+              color: textColor, fontWeight: FontWeight.bold, fontSize: 17),
         ),
         content: const SingleChildScrollView(
           child: Text(
@@ -155,7 +169,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Tamam")),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text("Tamam")),
         ],
       ),
     );
@@ -174,7 +189,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ? displayName[0].toUpperCase()
         : (email.isNotEmpty ? email[0].toUpperCase() : "U");
 
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
     final cardColor = Theme.of(context).cardColor;
 
     return Scaffold(
@@ -189,7 +205,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         title: Text(
           "Ayarlar",
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: textColor),
+          style: TextStyle(
+              fontWeight: FontWeight.bold, fontSize: 22, color: textColor),
         ),
       ),
       body: SafeArea(
@@ -234,7 +251,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           const SizedBox(height: 2),
                           Text(
                             email,
-                            style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.85)),
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.white.withOpacity(0.85)),
                           ),
                         ],
                       ),
@@ -246,14 +265,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 24),
-
               const Padding(
                 padding: EdgeInsets.only(left: 8, bottom: 8),
                 child: Text(
                   "Bildirim & Görünüm",
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey),
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey),
                 ),
               ),
               Container(
@@ -271,10 +291,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           : "Kapalı: Anlık uyarı pencereleri susturuldu",
                       value: sensorProvider.notificationsEnabled,
                       textColor: textColor,
-                      onChanged: (val) => sensorProvider.setNotificationsEnabled(val),
+                      onChanged: (val) =>
+                          sensorProvider.setNotificationsEnabled(val),
                     ),
                     if (sensorProvider.notificationsEnabled) ...[
-                      Divider(height: 1, indent: 64, color: Colors.grey.withOpacity(0.15)),
+                      Divider(
+                          height: 1,
+                          indent: 64,
+                          color: Colors.grey.withOpacity(0.15)),
                       _buildActionTile(
                         icon: Icons.notification_important_outlined,
                         title: "Bildirim Sistemini Test Et",
@@ -293,11 +317,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         },
                       ),
                     ],
-                    Divider(height: 1, indent: 64, color: Colors.grey.withOpacity(0.15)),
+                    Divider(
+                        height: 1,
+                        indent: 64,
+                        color: Colors.grey.withOpacity(0.15)),
                     _buildSwitchTile(
                       icon: Icons.dark_mode_outlined,
                       title: "Karanlık Mod",
-                      subtitle: "Tema tercihiniz cihazda kalıcı olarak saklanır",
+                      subtitle:
+                          "Tema tercihiniz cihazda kalıcı olarak saklanır",
                       value: themeProvider.isDarkMode,
                       textColor: textColor,
                       onChanged: (val) => themeProvider.toggleTheme(val),
@@ -305,14 +333,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 24),
-
               const Padding(
                 padding: EdgeInsets.only(left: 8, bottom: 8),
                 child: Text(
                   "Donanım & Güvenlik",
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey),
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey),
                 ),
               ),
               Container(
@@ -329,7 +358,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       textColor: textColor,
                       onTap: () => DeviceHealthSheet.show(context),
                     ),
-                    Divider(height: 1, indent: 64, color: Colors.grey.withOpacity(0.15)),
+                    Divider(
+                        height: 1,
+                        indent: 64,
+                        color: Colors.grey.withOpacity(0.15)),
                     _buildSwitchTile(
                       icon: Icons.memory,
                       title: "Gerçek ESP32 Donanım Modu",
@@ -338,9 +370,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           : "Simülasyon Modu: Sanal test sensörleri aktif",
                       value: sensorProvider.isHardwareMode,
                       textColor: textColor,
-                      onChanged: (val) => sensorProvider.setHardwareMode(val),
+                      onChanged: (val) async {
+                        final changed =
+                            await sensorProvider.setHardwareMode(val);
+                        if (!changed && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                              content: Text(
+                                  'Bekleyen sulama işlemi var. Önce pompayı durdurun veya tamamlanmasını bekleyin.')));
+                        }
+                      },
                     ),
-                    Divider(height: 1, indent: 64, color: Colors.grey.withOpacity(0.15)),
+                    Divider(
+                        height: 1,
+                        indent: 64,
+                        color: Colors.grey.withOpacity(0.15)),
                     _buildActionTile(
                       icon: Icons.sensors,
                       title: "Pompa ve Çevrimdışı Sınırları",
@@ -349,7 +392,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       textColor: textColor,
                       onTap: _showSensorAndPumpSettings,
                     ),
-                    Divider(height: 1, indent: 64, color: Colors.grey.withOpacity(0.15)),
+                    Divider(
+                        height: 1,
+                        indent: 64,
+                        color: Colors.grey.withOpacity(0.15)),
                     _buildActionTile(
                       icon: Icons.shield_outlined,
                       title: "Veri Mimarisi ve Güvenlik",
@@ -359,14 +405,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 24),
-
               const Padding(
                 padding: EdgeInsets.only(left: 8, bottom: 8),
                 child: Text(
                   "Hesap",
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey),
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey),
                 ),
               ),
               Container(
@@ -383,7 +430,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       textColor: textColor,
                       onTap: () {},
                     ),
-                    Divider(height: 1, indent: 64, color: Colors.grey.withOpacity(0.15)),
+                    Divider(
+                        height: 1,
+                        indent: 64,
+                        color: Colors.grey.withOpacity(0.15)),
                     _buildActionTile(
                       icon: Icons.logout,
                       title: "Çıkış Yap",
@@ -393,7 +443,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: () async {
                         await authProvider.signOut();
                         if (context.mounted) {
-                          Navigator.of(context).popUntil((route) => route.isFirst);
+                          Navigator.of(context)
+                              .popUntil((route) => route.isFirst);
                         }
                       },
                     ),
@@ -436,11 +487,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Text(
                   title,
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor),
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: textColor),
                 ),
                 if (subtitle != null) ...[
                   const SizedBox(height: 2),
-                  Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  Text(subtitle,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
                 ],
               ],
             ),
@@ -485,7 +540,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Expanded(
               child: Text(
                 title,
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor),
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: textColor),
               ),
             ),
             if (trailingText != null) ...[

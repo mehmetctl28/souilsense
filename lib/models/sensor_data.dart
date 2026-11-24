@@ -13,9 +13,20 @@ class SensorConfig {
     this.maxPumpSeconds = 15,
   });
 
+  bool get isValid =>
+      dryAdcValue >= 0 &&
+      dryAdcValue <= 4095 &&
+      wetAdcValue >= 0 &&
+      wetAdcValue <= 4095 &&
+      (dryAdcValue - wetAdcValue).abs() >= 200 &&
+      maxPumpSeconds >= 1 &&
+      maxPumpSeconds <= 30 &&
+      readIntervalSeconds >= 1 &&
+      readIntervalSeconds <= 3600;
+
   double convertAdcToMoisture(int rawAdc) {
-    final span = (dryAdcValue - wetAdcValue).abs();
-    if (span == 0) return 50.0;
+    final span = dryAdcValue - wetAdcValue;
+    if (!isValid) return double.nan;
     final normalized = ((dryAdcValue - rawAdc) / span) * 100.0;
     return normalized.clamp(0.0, 100.0);
   }
@@ -25,8 +36,10 @@ class SensorConfig {
       sensorId: sensorId,
       dryAdcValue: SensorData.parseSafeInt(map['dryAdcValue'], fallback: 3200),
       wetAdcValue: SensorData.parseSafeInt(map['wetAdcValue'], fallback: 1400),
-      readIntervalSeconds: SensorData.parseSafeInt(map['readIntervalSeconds'], fallback: 60),
-      maxPumpSeconds: SensorData.parseSafeInt(map['maxPumpSeconds'], fallback: 15),
+      readIntervalSeconds:
+          SensorData.parseSafeInt(map['readIntervalSeconds'], fallback: 60),
+      maxPumpSeconds:
+          SensorData.parseSafeInt(map['maxPumpSeconds'], fallback: 15),
     );
   }
 
@@ -56,9 +69,12 @@ class TelemetryPoint {
   factory TelemetryPoint.fromMap(int timestamp, Map<dynamic, dynamic> map) {
     return TelemetryPoint(
       timestamp: timestamp,
-      moisture: SensorData.parseSafeDouble(map['moisture'], fallback: 0.0).clamp(0.0, 100.0),
-      temperature: SensorData.parseSafeDouble(map['temperature'], fallback: 24.0),
-      light: SensorData.parseSafeDouble(map['light'], fallback: 60.0).clamp(0.0, 100.0),
+      moisture: SensorData.parseSafeDouble(map['moisture'], fallback: 0.0)
+          .clamp(0.0, 100.0),
+      temperature:
+          SensorData.parseSafeDouble(map['temperature'], fallback: 24.0),
+      light: SensorData.parseSafeDouble(map['light'], fallback: 60.0)
+          .clamp(0.0, 100.0),
     );
   }
 
@@ -104,6 +120,7 @@ class SensorData {
   final int lastUpdate;
   final bool isSimulated;
   final bool hasMissingFields;
+  final int protocolVersion;
 
   SensorData({
     required this.sensorId,
@@ -114,44 +131,32 @@ class SensorData {
     required this.lastUpdate,
     this.isSimulated = false,
     this.hasMissingFields = false,
+    this.protocolVersion = 0,
   });
 
-  static double parseSafeDouble(dynamic value, {required double fallback}) {
-    if (value == null) return fallback;
-    if (value is num) return value.toDouble();
-    if (value is String) {
-      return double.tryParse(value.replaceAll(',', '.').trim()) ?? fallback;
-    }
-    return fallback;
+  static double? finiteNumber(dynamic value) {
+    final parsed = value is num
+        ? value.toDouble()
+        : value is String
+            ? double.tryParse(value.replaceAll(',', '.').trim())
+            : null;
+    return parsed != null && parsed.isFinite ? parsed : null;
   }
+
+  static double parseSafeDouble(dynamic value, {required double fallback}) =>
+      finiteNumber(value) ?? fallback;
 
   static int parseSafeInt(dynamic value, {required int fallback}) {
-    if (value == null) return fallback;
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    if (value is String) {
-      return int.tryParse(value.trim()) ?? fallback;
-    }
-    return fallback;
+    final n = finiteNumber(value);
+    return n != null && n == n.truncateToDouble() ? n.toInt() : fallback;
   }
 
-  /// Eksik veya geçersiz zaman damgası için 0 döndürür; ölçüm zamanını uydurmaz.
+  /// Accept plausible Unix seconds or milliseconds; never invent a receipt time.
   static int normalizeTimestamp(dynamic rawTimestamp) {
-    final now = DateTime.now().millisecondsSinceEpoch;
     final parsed = parseSafeInt(rawTimestamp, fallback: 0);
-    if (parsed <= 0) return 0;
-
-    // 10 haneli saniye cinsinden Unix timestamp -> milisaniye
-    if (parsed > 1577836800 && parsed < 1577836800000) {
-      return parsed * 1000;
-    }
-
-    // 2020 öncesi (örneğin ESP32 millis() değeri) gerçek duvar saati değildir
-    if (parsed < 1577836800000) {
-      return now;
-    }
-
-    return parsed;
+    if (parsed >= 1577836800 && parsed <= 4102444800) return parsed * 1000;
+    if (parsed >= 1577836800000 && parsed <= 4102444800000) return parsed;
+    return 0;
   }
 
   factory SensorData.fromMap(
@@ -160,32 +165,53 @@ class SensorData {
     SensorConfig? config,
     bool isSimulated = false,
   }) {
-    final int? adc = map['rawAdc'] != null ? parseSafeInt(map['rawAdc'], fallback: 0) : null;
-    final bool hasMoistureOrAdc = map['moisture'] != null || adc != null;
-    final bool hasTemp = map['temperature'] != null;
-    final bool hasLight = map['light'] != null;
-    final bool missing = !hasMoistureOrAdc || !hasTemp || !hasLight;
-
-    double resolvedMoisture;
-    if (adc != null && config != null) {
-      resolvedMoisture = config.convertAdcToMoisture(adc);
-    } else {
-      resolvedMoisture = parseSafeDouble(map['moisture'], fallback: 0.0).clamp(0.0, 100.0);
-    }
-
-    final normalizedTs = normalizeTimestamp(map['lastUpdate']);
-
+    final raw = finiteNumber(map['rawAdc']);
+    final adcValid =
+        raw != null && raw == raw.truncateToDouble() && raw >= 0 && raw <= 4095;
+    final adc = adcValid ? raw.toInt() : null;
+    final moisture = finiteNumber(map['moisture']);
+    final temp = finiteNumber(map['temperature']);
+    final light = finiteNumber(map['light']);
+    final useAdc = map.containsKey('rawAdc') && config != null;
+    final moistureValid = useAdc
+        ? adcValid && config.isValid
+        : moisture != null && moisture >= 0 && moisture <= 100;
+    final valid = moistureValid &&
+        temp != null &&
+        temp >= -50 &&
+        temp <= 100 &&
+        light != null &&
+        light >= 0 &&
+        light <= 100 &&
+        (!map.containsKey('rawAdc') || adcValid);
     return SensorData(
       sensorId: sensorId,
-      moisture: resolvedMoisture,
-      temperature: parseSafeDouble(map['temperature'], fallback: 24.0),
-      light: parseSafeDouble(map['light'], fallback: 60.0).clamp(0.0, 100.0),
+      moisture: useAdc && moistureValid
+          ? config.convertAdcToMoisture(adc!)
+          : moistureValid
+              ? moisture!
+              : 0,
+      temperature: temp ?? 0,
+      light: light ?? 0,
       rawAdc: adc,
-      lastUpdate: normalizedTs,
+      lastUpdate: normalizeTimestamp(map['lastUpdate']),
       isSimulated: isSimulated || map['isSimulated'] == true,
-      hasMissingFields: missing,
+      hasMissingFields: !valid,
+      protocolVersion: parseSafeInt(map['protocolVersion'], fallback: 0),
     );
   }
+
+  bool get isValidMeasurement =>
+      !hasMissingFields &&
+      moisture.isFinite &&
+      moisture >= 0 &&
+      moisture <= 100 &&
+      temperature.isFinite &&
+      temperature >= -50 &&
+      temperature <= 100 &&
+      light.isFinite &&
+      light >= 0 &&
+      light <= 100;
 
   Map<String, dynamic> toMap() {
     return {
@@ -195,11 +221,12 @@ class SensorData {
       if (rawAdc != null) 'rawAdc': rawAdc,
       'lastUpdate': lastUpdate,
       'isSimulated': isSimulated,
+      'protocolVersion': protocolVersion,
     };
   }
 
   bool isOnlineWithThreshold(int timeoutMinutes) {
-    if (lastUpdate <= 0) return false;
+    if (lastUpdate <= 0 || !isValidMeasurement) return false;
     final difference = DateTime.now().millisecondsSinceEpoch - lastUpdate;
     if (difference < 0) return false;
     return difference < timeoutMinutes * 60 * 1000;

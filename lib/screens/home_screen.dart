@@ -23,7 +23,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   String _formatLastUpdate(int? timestamp) {
     if (timestamp == null || timestamp == 0) return "Veri yok";
-    final diff = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(timestamp));
+    final diff = DateTime.now()
+        .difference(DateTime.fromMillisecondsSinceEpoch(timestamp));
     if (diff.inMinutes < 1) return "Az önce";
     if (diff.inMinutes < 60) return "${diff.inMinutes} dk önce";
     if (diff.inHours < 24) return "${diff.inHours} sa önce";
@@ -38,7 +39,8 @@ class _HomeScreenState extends State<HomeScreen> {
   ) {
     FocusManager.instance.primaryFocus?.unfocus();
     final cardColor = Theme.of(context).cardColor;
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
     final bottomInset = MediaQuery.of(context).viewPadding.bottom;
 
     showModalBottomSheet(
@@ -53,19 +55,24 @@ class _HomeScreenState extends State<HomeScreen> {
         return SafeArea(
           top: false,
           child: Padding(
-            padding: EdgeInsets.fromLTRB(24, 24, 24, bottomInset > 0 ? bottomInset + 12 : 24),
+            padding: EdgeInsets.fromLTRB(
+                24, 24, 24, bottomInset > 0 ? bottomInset + 12 : 24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.water_drop_outlined, color: AppColors.primary, size: 24),
+                    const Icon(Icons.water_drop_outlined,
+                        color: AppColors.primary, size: 24),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         "Sulama ve Nem Kontrolü",
-                        style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: textColor),
+                        style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.bold,
+                            color: textColor),
                       ),
                     ),
                   ],
@@ -85,13 +92,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     itemCount: plants.length,
                     itemBuilder: (context, index) {
                       final plant = plants[index];
-                      final SensorData? sensor = sensorProvider.getSensor(plant.sensorId);
-                      final double liveMoisture = sensor != null ? sensor.moisture : plant.moistureLevel;
-                      final bool isThirsty = liveMoisture < plant.minMoisture;
+                      final SensorData? sensor =
+                          sensorProvider.getSensor(plant.sensorId);
+                      final double liveMoisture = sensor != null
+                          ? sensor.moisture
+                          : plant.moistureLevel;
+                      final bool isThirsty = sensor?.isOnline == true &&
+                          liveMoisture < plant.minMoisture;
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
                           color: Theme.of(context).scaffoldBackgroundColor,
                           borderRadius: BorderRadius.circular(18),
@@ -102,7 +114,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             Navigator.pop(ctx);
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => PlantDetailScreen(plantId: plant.id)),
+                              MaterialPageRoute(
+                                  builder: (_) =>
+                                      PlantDetailScreen(plantId: plant.id)),
                             );
                           },
                           leading: CircleAvatar(
@@ -113,43 +127,64 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: Icon(
                               Icons.water_drop_outlined,
                               size: 20,
-                              color: isThirsty ? AppColors.statusCritical : AppColors.statusGood,
+                              color: isThirsty
+                                  ? AppColors.statusCritical
+                                  : AppColors.statusGood,
                             ),
                           ),
                           title: Text(
                             plant.name,
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor),
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                color: textColor),
                           ),
                           subtitle: Text(
-                            "Nem: %${liveMoisture.toInt()} (Eşik: %${plant.minMoisture}) • ${_formatLastUpdate(sensor?.lastUpdate)}",
+                            sensor?.isValidMeasurement == true
+                                ? "Nem: %${liveMoisture.toInt()} (Eşik: %${plant.minMoisture}) • ${_formatLastUpdate(sensor?.lastUpdate)}"
+                                : "Geçerli ölçüm yok",
                             style: TextStyle(
-                              color: isThirsty ? AppColors.statusCritical : Colors.grey,
+                              color: isThirsty
+                                  ? AppColors.statusCritical
+                                  : Colors.grey,
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                           trailing: ElevatedButton(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: isThirsty ? AppColors.statusCritical : AppColors.primary,
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              backgroundColor: isThirsty
+                                  ? AppColors.statusCritical
+                                  : AppColors.primary,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
                             ),
                             onPressed: () async {
-                              await plantProvider.togglePump(plant.id, true);
-                              await sensorProvider.requestPumpState(
+                              final sent =
+                                  await sensorProvider.requestPumpState(
                                 sensorId: plant.sensorId,
                                 requestedState: true,
                               );
                               if (ctx.mounted) Navigator.pop(ctx);
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text("${plant.name}: Pompa komutu gönderildi.")),
+                                  SnackBar(
+                                      content: Text(sent
+                                          ? (sensorProvider.isHardwareMode
+                                              ? 'Komut gönderildi; cihaz onayı bekleniyor.'
+                                              : 'Yerel sulama simülasyonu çalıştı.')
+                                          : 'Komut gönderilemedi. Cihaz durumunu kontrol edin.')),
                                 );
                               }
                             },
                             child: const Text(
                               "Sula",
-                              style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold),
                             ),
                           ),
                         ),
@@ -165,10 +200,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showGardenHistorySheet(BuildContext context, SensorProvider sensorProvider) {
+  void _showGardenHistorySheet(
+      BuildContext context, SensorProvider sensorProvider) {
     FocusManager.instance.primaryFocus?.unfocus();
     final cardColor = Theme.of(context).cardColor;
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
     final events = sensorProvider.getAllGardenTimeline();
 
     showModalBottomSheet(
@@ -191,12 +228,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.history, color: AppColors.primary, size: 24),
+                      const Icon(Icons.history,
+                          color: AppColors.primary, size: 24),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           "Sistem Kayıt Geçmişi",
-                          style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: textColor),
+                          style: TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.bold,
+                              color: textColor),
                         ),
                       ),
                     ],
@@ -223,20 +264,24 @@ class _HomeScreenState extends State<HomeScreen> {
                                 margin: const EdgeInsets.only(bottom: 10),
                                 padding: const EdgeInsets.all(14),
                                 decoration: BoxDecoration(
-                                  color: Theme.of(context).scaffoldBackgroundColor,
+                                  color:
+                                      Theme.of(context).scaffoldBackgroundColor,
                                   borderRadius: BorderRadius.circular(16),
                                 ),
                                 child: Row(
                                   children: [
                                     Icon(
-                                      ev.type == 'watering' ? Icons.water_drop_outlined : Icons.sensors,
+                                      ev.type == 'watering'
+                                          ? Icons.water_drop_outlined
+                                          : Icons.sensors,
                                       color: AppColors.primary,
                                       size: 20,
                                     ),
                                     const SizedBox(width: 12),
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             ev.title,
@@ -249,7 +294,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                           const SizedBox(height: 2),
                                           Text(
                                             ev.subtitle,
-                                            style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                            style: const TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.grey),
                                           ),
                                         ],
                                       ),
@@ -257,7 +304,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                     const SizedBox(width: 8),
                                     Text(
                                       _formatLastUpdate(ev.timestamp),
-                                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                      style: const TextStyle(
+                                          fontSize: 11, color: Colors.grey),
                                     ),
                                   ],
                                 ),
@@ -281,7 +329,8 @@ class _HomeScreenState extends State<HomeScreen> {
   ) {
     FocusManager.instance.primaryFocus?.unfocus();
     final cardColor = Theme.of(context).cardColor;
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
 
     if (plants.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -329,12 +378,16 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.tune, color: AppColors.primary, size: 24),
+                          const Icon(Icons.tune,
+                              color: AppColors.primary, size: 24),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               "Telemetri Test & Eşik Simülatörü",
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor),
+                              style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: textColor),
                             ),
                           ),
                         ],
@@ -372,7 +425,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 14),
                       Text(
                         "Toprak Nemi: %${simMoisture.toInt()} (Alt Eşik: %${selectedPlant.minMoisture})",
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: textColor),
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: textColor),
                       ),
                       Slider(
                         value: simMoisture.clamp(0.0, 100.0),
@@ -383,7 +439,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       Text(
                         "Ortam Sıcaklığı: ${simTemp.toStringAsFixed(1)}°C (Referans: 18–28°C)",
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: textColor),
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: textColor),
                       ),
                       Slider(
                         value: simTemp.clamp(5.0, 42.0),
@@ -394,7 +453,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       Text(
                         "Işık Şiddeti: %${simLight.toInt()} (Referans: %25–85)",
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: textColor),
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: textColor),
                       ),
                       Slider(
                         value: simLight.clamp(0.0, 100.0),
@@ -407,7 +469,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       ...checks.map(
                         (c) => Container(
                           margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
                           decoration: BoxDecoration(
                             color: Theme.of(context).scaffoldBackgroundColor,
                             borderRadius: BorderRadius.circular(12),
@@ -426,7 +489,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
                                   color: c.statusColor.withOpacity(0.15),
                                   borderRadius: BorderRadius.circular(8),
@@ -449,7 +513,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         width: double.infinity,
                         height: 48,
                         child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary),
                           onPressed: () async {
                             await sensorProvider.simulateSensorReading(
                               sensorId: selectedPlant.sensorId,
@@ -461,7 +526,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                           child: const Text(
                             "Değerleri Sensöre Uygula",
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold),
                           ),
                         ),
                       ),
@@ -487,14 +554,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final attentionPlants = plants.where((p) {
       final s = sensorProvider.getSensor(p.sensorId);
       final liveMoisture = s != null ? s.moisture : p.moistureLevel;
-      return liveMoisture < p.minMoisture;
+      return s?.isOnline == true && liveMoisture < p.minMoisture;
     }).toList();
 
     final int healthyPlantCount = plants.length - attentionPlants.length;
 
-    final int onlineSensorCount = plants
-        .where((p) => sensorProvider.isSensorOnline(p.sensorId))
-        .length;
+    final int onlineSensorCount =
+        plants.where((p) => sensorProvider.isSensorOnline(p.sensorId)).length;
 
     final int gardenHealthScore = PlantIntelligence.calculateGardenAverageScore(
       plants,
@@ -515,7 +581,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     final userName = authProvider.currentUser?.displayName ?? "";
-    final textColor = Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? AppColors.textDark;
     final cardColor = Theme.of(context).cardColor;
 
     return GestureDetector(
@@ -538,21 +605,31 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         Text(
                           "SoilSense",
-                          style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: textColor),
+                          style: TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: textColor),
                         ),
                         Text(
-                          userName.isNotEmpty ? "Merhaba, $userName 👋" : "Merhaba, 👋",
-                          style: const TextStyle(fontSize: 15, color: Colors.grey, fontWeight: FontWeight.w500),
+                          userName.isNotEmpty
+                              ? "Merhaba, $userName 👋"
+                              : "Merhaba, 👋",
+                          style: const TextStyle(
+                              fontSize: 15,
+                              color: Colors.grey,
+                              fontWeight: FontWeight.w500),
                         ),
                       ],
                     ),
                     IconButton(
-                      icon: Icon(Icons.settings_outlined, color: textColor, size: 28),
+                      icon: Icon(Icons.settings_outlined,
+                          color: textColor, size: 28),
                       onPressed: () {
                         FocusManager.instance.primaryFocus?.unfocus();
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                          MaterialPageRoute(
+                              builder: (_) => const SettingsScreen()),
                         );
                       },
                     ),
@@ -579,7 +656,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         const Text(
                           "Akıllı Bahçene Hoş Geldin",
-                          style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 8),
                         const Text(
@@ -591,11 +671,13 @@ class _HomeScreenState extends State<HomeScreen> {
                           onPressed: () {
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const AddPlantScreen()),
+                              MaterialPageRoute(
+                                  builder: (_) => const AddPlantScreen()),
                             );
                           },
                           icon: const Icon(Icons.add, color: Colors.white),
-                          label: const Text("İlk Bitkini Ekle", style: TextStyle(color: Colors.white)),
+                          label: const Text("İlk Bitkini Ekle",
+                              style: TextStyle(color: Colors.white)),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.white.withOpacity(0.2),
                             elevation: 0,
@@ -621,12 +703,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         const Row(
                           children: [
-                            Icon(Icons.warning_amber_rounded, color: Colors.white, size: 28),
+                            Icon(Icons.warning_amber_rounded,
+                                color: Colors.white, size: 28),
                             SizedBox(width: 10),
                             Expanded(
                               child: Text(
                                 "Bakım Bekleyenler Var!",
-                                style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold),
                               ),
                             ),
                           ],
@@ -634,7 +720,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 10),
                         Text(
                           "${attentionPlants.length} bitkinin toprak nemi alt sınırın altında.",
-                          style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 15),
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.95),
+                              fontSize: 15),
                         ),
                         const SizedBox(height: 18),
                         ElevatedButton(
@@ -648,12 +736,15 @@ class _HomeScreenState extends State<HomeScreen> {
                             backgroundColor: Colors.white.withOpacity(0.2),
                             foregroundColor: Colors.white,
                             elevation: 0,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
                           ),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text("Şimdi Kontrol Et", style: TextStyle(fontWeight: FontWeight.bold)),
+                              Text("Şimdi Kontrol Et",
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.bold)),
                               SizedBox(width: 8),
                               Icon(Icons.arrow_forward, size: 18),
                             ],
@@ -679,12 +770,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.check_circle_outline, color: Colors.white, size: 28),
+                            Icon(Icons.check_circle_outline,
+                                color: Colors.white, size: 28),
                             SizedBox(width: 10),
                             Expanded(
                               child: Text(
                                 "Her Şey Yolunda!",
-                                style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold),
                               ),
                             ),
                           ],
@@ -712,7 +807,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.analytics_outlined, color: AppColors.primary, size: 20),
+                            const Icon(Icons.analytics_outlined,
+                                color: AppColors.primary, size: 20),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
@@ -728,7 +824,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
                                 color: (gardenHealthScore >= 75
                                         ? AppColors.statusGood
@@ -793,7 +890,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 // 4. HIZLI İŞLEMLER
                 Text(
                   "Hızlı İşlemler",
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor),
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: textColor),
                 ),
                 const SizedBox(height: 16),
                 Row(
@@ -806,7 +906,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         FocusManager.instance.primaryFocus?.unfocus();
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => const AddPlantScreen()),
+                          MaterialPageRoute(
+                              builder: (_) => const AddPlantScreen()),
                         );
                       },
                     ),
@@ -816,22 +917,27 @@ class _HomeScreenState extends State<HomeScreen> {
                       onTap: () {
                         if (plants.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("Önce bahçenize bir bitki ekleyin.")),
+                            const SnackBar(
+                                content:
+                                    Text("Önce bahçenize bir bitki ekleyin.")),
                           );
                         } else {
-                          _showCriticalAndWateringSheet(context, plants, sensorProvider, plantProvider);
+                          _showCriticalAndWateringSheet(
+                              context, plants, sensorProvider, plantProvider);
                         }
                       },
                     ),
                     QuickActionButton(
                       icon: Icons.history,
                       label: "Geçmiş",
-                      onTap: () => _showGardenHistorySheet(context, sensorProvider),
+                      onTap: () =>
+                          _showGardenHistorySheet(context, sensorProvider),
                     ),
                     QuickActionButton(
                       icon: Icons.tune,
                       label: "Simülatör",
-                      onTap: () => _showTelemetrySimulatorSheet(context, plants, sensorProvider),
+                      onTap: () => _showTelemetrySimulatorSheet(
+                          context, plants, sensorProvider),
                     ),
                   ],
                 ),
@@ -844,7 +950,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 // Kritik 4: Donanım / Simülasyon Modu ve Son Gerçek Veri Durum Bandı
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
                     color: sensorProvider.isHardwareMode
                         ? AppColors.statusGood.withOpacity(0.12)
@@ -859,9 +966,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Row(
                     children: [
                       Icon(
-                        sensorProvider.isHardwareMode ? Icons.memory : Icons.science_outlined,
+                        sensorProvider.isHardwareMode
+                            ? Icons.memory
+                            : Icons.science_outlined,
                         size: 18,
-                        color: sensorProvider.isHardwareMode ? AppColors.statusGood : Colors.blue,
+                        color: sensorProvider.isHardwareMode
+                            ? AppColors.statusGood
+                            : Colors.blue,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -898,7 +1009,9 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         Icon(icon, color: iconColor, size: 20),
         const SizedBox(height: 4),
-        Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: textColor)),
+        Text(value,
+            style: TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 14, color: textColor)),
         Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
       ],
     );
