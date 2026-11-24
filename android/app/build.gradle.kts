@@ -1,3 +1,6 @@
+import com.android.build.api.dsl.ApplicationExtension
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -6,18 +9,14 @@ plugins {
     id("com.google.gms.google-services")
 }
 
-android {
+extensions.configure<ApplicationExtension> {
     namespace = "com.example.test_app_fixed"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "27.0.12077973"
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
-    }
-
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
     defaultConfig {
@@ -30,11 +29,17 @@ android {
     }
 
     buildTypes {
-        release {
+        named("release") {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_11)
     }
 }
 
